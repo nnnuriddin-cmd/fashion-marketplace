@@ -56,7 +56,9 @@ export default function StoreCard({ store }: StoreCardProps) {
             <h3 className="text-sm font-bold text-neutral-900 group-hover:text-amber-800 transition-colors">
               {store.name}
             </h3>
-            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" title="Verified Marketplace Store" />
+            <span title="Verified Marketplace Store">
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+            </span>
           </div>
 
           {store.description && (
