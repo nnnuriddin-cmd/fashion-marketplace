@@ -85,3 +85,13 @@ CREATE INDEX IF NOT EXISTS idx_products_slug ON products(slug);
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+
+-- Temporary drafts created by the Telegram seller bot.
+CREATE TABLE IF NOT EXISTS telegram_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  seller_telegram_id TEXT NOT NULL,
+  store_id UUID NOT NULL REFERENCES stores(id) ON DELETE CASCADE,
+  draft JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_sessions_seller ON telegram_sessions(seller_telegram_id, created_at DESC);
