@@ -87,7 +87,9 @@ export default function StoreFrontpage({ params, searchParams }: StorePageProps)
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <h1 className="text-2xl sm:text-3xl font-serif font-bold text-neutral-900">{store.name}</h1>
-                <ShieldCheck className="w-5 h-5 text-emerald-600" title="Verified Marketplace Boutique" />
+                <span title="Verified Marketplace Boutique">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                </span>
               </div>
 
               <p className="text-xs text-neutral-600 max-w-2xl leading-relaxed">{store.description}</p>
