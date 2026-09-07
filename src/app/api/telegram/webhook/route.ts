@@ -241,7 +241,7 @@ export async function POST(req: NextRequest) {
 
         const parsedSizes = parts.filter((p: string) => ['XS', 'S', 'M', 'L', 'XL', 'XXL', '38', '39', '40', '41', '42'].includes(p.toUpperCase()));
         if (parsedSizes.length > 0) {
-          meta.sizes = parsedSizes.map((s) => s.toUpperCase());
+          meta.sizes = parsedSizes.map((s: string) => s.toUpperCase());
         }
 
         const lastPart = parseInt(parts[parts.length - 1]);
