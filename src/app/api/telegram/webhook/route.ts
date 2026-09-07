@@ -8,17 +8,37 @@ const menu = { keyboard: [[{ text: '➕ Add Product' }, { text: '📦 My Product
 export async function POST(request: NextRequest) {
   try {
     const update = await request.json();
+    if (update.callback_query?.data?.startsWith('language_')) {
+      const chatId = String(update.callback_query.message.chat.id);
+      const language = update.callback_query.data.replace('language_', '');
+      const welcome: Record<string, string> = {
+        ru: '✅ Русский выбран. Отправьте фото товара, чтобы добавить его в магазин.',
+        uz: "✅ O'zbek tili tanlandi. Mahsulot qo'shish uchun rasmini yuboring.",
+        en: '✅ English selected. Send a product photo to add it to your store.',
+      };
+      await sendTelegramMessage(chatId, welcome[language] ?? welcome.en, menu);
+      return NextResponse.json({ ok: true });
+    }
     const message = update.message;
     if (!message) return NextResponse.json({ ok: true });
     const chatId = String(message.chat.id);
     const text = message.text?.trim() || '';
+    if (text === '/start') {
+      await sendTelegramMessage(chatId, '🌐 <b>Выберите язык / Tilni tanlang / Choose a language</b>', {
+        inline_keyboard: [[
+          { text: 'Русский', callback_data: 'language_ru' },
+          { text: "O'zbekcha", callback_data: 'language_uz' },
+          { text: 'English', callback_data: 'language_en' },
+        ]],
+      });
+      return NextResponse.json({ ok: true });
+    }
     const { data: user } = await supabase.from('users').select('id').eq('telegram_id', chatId).maybeSingle();
     const { data: store, error: storeError } = user
       ? await supabase.from('stores').select('id,name').eq('owner_id', user.id).maybeSingle()
       : await supabase.from('stores').select('id,name').limit(1).maybeSingle();
     if (storeError) throw storeError;
     if (!store) return NextResponse.json({ ok: true });
-    if (text === '/start') { await sendTelegramMessage(chatId, '👋 Send a product photo to add it to your store.', menu); return NextResponse.json({ ok: true }); }
     if (text === '📦 My Products') {
       const { count, error } = await supabase.from('products').select('*', { count: 'exact', head: true }).eq('store_id', store.id);
       if (error) throw error;
