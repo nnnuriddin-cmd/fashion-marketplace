@@ -4,12 +4,17 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { ShoppingBag, Search, Store, User, Menu, X, Sparkles, ShieldCheck } from 'lucide-react';
 import { useCart } from '@/lib/cart-context';
+import { useLanguage } from '@/lib/language-context';
 
 export default function Navbar() {
   const { getTotalItemsCount } = useCart();
+  const { language, setLanguage } = useLanguage();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const totalCount = getTotalItemsCount();
+  const t = language === 'uz'
+    ? { home: 'Bosh sahifa', women: 'Ayollar', men: 'Erkaklar', shoes: 'Oyoq kiyim', bags: 'Sumkalar', accessories: 'Aksessuarlar', stores: 'Do‘konlar', search: 'Mahsulot yoki do‘kon qidiring...', seller: 'Sotuvchi paneli' }
+    : { home: 'Home', women: 'Women', men: 'Men', shoes: 'Shoes', bags: 'Bags', accessories: 'Accessories', stores: 'Stores', search: 'Search fashion, stores...', seller: 'Seller Hub' };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,16 +44,16 @@ export default function Navbar() {
 
           {/* Desktop Navigation Category Links */}
           <nav className="hidden md:flex items-center space-x-6 text-sm font-medium text-neutral-700">
-            <Link href="/" className="hover:text-amber-800 transition-colors">Home</Link>
-            <Link href="/search?gender=WOMEN" className="hover:text-amber-800 transition-colors">Women</Link>
-            <Link href="/search?gender=MEN" className="hover:text-amber-800 transition-colors">Men</Link>
-            <Link href="/search?category=shoes" className="hover:text-amber-800 transition-colors">Shoes</Link>
-            <Link href="/search?category=bags" className="hover:text-amber-800 transition-colors">Bags</Link>
-            <Link href="/search?category=accessories" className="hover:text-amber-800 transition-colors">Accessories</Link>
+            <Link href="/" className="hover:text-amber-800 transition-colors">{t.home}</Link>
+            <Link href="/search?gender=WOMEN" className="hover:text-amber-800 transition-colors">{t.women}</Link>
+            <Link href="/search?gender=MEN" className="hover:text-amber-800 transition-colors">{t.men}</Link>
+            <Link href="/search?category=shoes" className="hover:text-amber-800 transition-colors">{t.shoes}</Link>
+            <Link href="/search?category=bags" className="hover:text-amber-800 transition-colors">{t.bags}</Link>
+            <Link href="/search?category=accessories" className="hover:text-amber-800 transition-colors">{t.accessories}</Link>
             <Link href="/search?sale=true" className="text-rose-600 font-semibold hover:text-rose-700">Sale</Link>
             <Link href="/stores" className="flex items-center gap-1 hover:text-amber-800 transition-colors">
               <Store className="w-4 h-4 text-amber-700" />
-              <span>Stores</span>
+              <span>{t.stores}</span>
             </Link>
           </nav>
 
@@ -56,7 +61,7 @@ export default function Navbar() {
           <form onSubmit={handleSearchSubmit} className="hidden lg:flex items-center relative w-64">
             <input
               type="text"
-              placeholder="Search fashion, stores..."
+              placeholder={t.search}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-neutral-100 border border-neutral-200 rounded-full py-1.5 pl-3.5 pr-8 text-xs focus:outline-none focus:ring-2 focus:ring-neutral-900"
@@ -68,6 +73,9 @@ export default function Navbar() {
 
           {/* Action Icons */}
           <div className="flex items-center gap-4">
+            <button onClick={() => setLanguage(language === 'en' ? 'uz' : 'en')} className="text-xs font-bold border border-neutral-200 rounded-full px-2 py-1 hover:bg-neutral-100" title="O‘zbekcha / English">
+              {language === 'en' ? 'O‘Z' : 'EN'}
+            </button>
             <Link href="/account" title="Account & Orders" className="text-neutral-700 hover:text-neutral-900 p-1">
               <User className="w-5 h-5" />
             </Link>
@@ -86,7 +94,7 @@ export default function Navbar() {
               className="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold bg-neutral-900 text-white px-3 py-1.5 rounded-full hover:bg-neutral-800 transition-all"
             >
               <Store className="w-3.5 h-3.5" />
-              <span>Seller Hub</span>
+              <span>{t.seller}</span>
             </Link>
 
             <Link

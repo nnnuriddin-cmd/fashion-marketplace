@@ -16,7 +16,12 @@ export async function POST(request: NextRequest) {
         uz: "✅ O'zbek tili tanlandi. Mahsulot qo'shish uchun rasmini yuboring.",
         en: '✅ English selected. Send a product photo to add it to your store.',
       };
-      await sendTelegramMessage(chatId, welcome[language] ?? welcome.en, menu);
+      const localizedMenu = language === 'uz'
+        ? { keyboard: [[{ text: "➕ Mahsulot qo'shish" }, { text: '📦 Mahsulotlarim' }]], resize_keyboard: true }
+        : language === 'ru'
+          ? { keyboard: [[{ text: '➕ Добавить товар' }, { text: '📦 Мои товары' }]], resize_keyboard: true }
+          : menu;
+      await sendTelegramMessage(chatId, welcome[language] ?? welcome.en, localizedMenu);
       return NextResponse.json({ ok: true });
     }
     const message = update.message;
