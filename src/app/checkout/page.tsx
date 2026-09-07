@@ -1,0 +1,289 @@
+'use client';
+
+import React, { useState } from 'react';
+import Link from 'next/link';
+import { useCart } from '@/lib/cart-context';
+import { ShieldCheck, Truck, CreditCard, CheckCircle, Store, Send } from 'lucide-react';
+
+export default function CheckoutPage() {
+  const { cart, getGroupedItemsByStore, getTotalAmount, clearCart } = useCart();
+  const grouped = getGroupedItemsByStore();
+  const grandTotal = getTotalAmount();
+
+  const [customerName, setCustomerName] = useState('Anora Karimova');
+  const [customerPhone, setCustomerPhone] = useState('+998901234567');
+  const [deliveryAddress, setDeliveryAddress] = useState('Tashkent, Yakkasaray District, Shota Rustaveli 45');
+  const [deliveryMethod, setDeliveryMethod] = useState('STANDARD');
+  const [paymentMethod, setPaymentMethod] = useState('CASH');
+  const [orderNotes, setOrderNotes] = useState('Please call before arrival.');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [completedOrder, setCompletedOrder] = useState<any>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (cart.length === 0) return;
+
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerName,
+          customerPhone,
+          deliveryAddress,
+          deliveryMethod,
+          paymentMethod,
+          orderNotes,
+          cartItems: cart,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setCompletedOrder(data);
+        clearCart();
+      } else {
+        alert(data.error || 'Checkout failed.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error during checkout.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (completedOrder) {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-16 text-center space-y-6">
+        <div className="bg-emerald-100 text-emerald-700 p-4 rounded-full w-20 h-20 mx-auto flex items-center justify-center">
+          <CheckCircle className="w-12 h-12" />
+        </div>
+
+        <h1 className="text-3xl font-serif font-bold text-neutral-900">Order Placed Successfully!</h1>
+        <p className="text-sm text-neutral-600">
+          Thank you, <strong>{customerName}</strong>! Your order number is:
+        </p>
+
+        <div className="bg-neutral-900 text-white p-4 rounded-2xl font-mono text-xl font-bold tracking-wider inline-block">
+          #{completedOrder.parentOrderNumber}
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl text-left text-xs text-amber-900 space-y-2">
+          <div className="flex items-center gap-2 font-bold text-amber-950 text-sm">
+            <Send className="w-4 h-4 text-amber-700" />
+            <span>Instant Telegram Seller Dispatch</span>
+          </div>
+          <p>
+            Your order was automatically split into <strong>{completedOrder.subOrdersCount} seller sub-order(s)</strong> and dispatched directly to the Telegram accounts of each store owner!
+          </p>
+          <p>You will receive status update alerts as sellers accept & ship your items.</p>
+        </div>
+
+        <div className="pt-4 flex justify-center gap-4">
+          <Link
+            href="/account"
+            className="bg-neutral-900 text-white font-semibold text-xs px-6 py-3 rounded-full hover:bg-neutral-800"
+          >
+            Track Order Status →
+          </Link>
+          <Link
+            href="/"
+            className="bg-neutral-100 text-neutral-800 font-semibold text-xs px-6 py-3 rounded-full hover:bg-neutral-200"
+          >
+            Return to Homepage
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (cart.length === 0) {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-4">
+        <h2 className="text-xl font-bold text-neutral-900">No items in cart to checkout</h2>
+        <Link href="/search" className="inline-block bg-neutral-900 text-white text-xs font-semibold px-4 py-2 rounded-lg">
+          Browse Fashion Catalog
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+      <div className="border-b border-neutral-200 pb-4">
+        <h1 className="text-2xl sm:text-3xl font-serif font-bold text-neutral-900">Checkout</h1>
+        <p className="text-xs text-neutral-500">Complete your delivery and payment details</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+        {/* Left Form Column (7 cols) */}
+        <div className="lg:col-span-7 space-y-6">
+          {/* Customer Information Card */}
+          <div className="bg-white p-6 rounded-2xl border border-neutral-200 space-y-4 shadow-sm">
+            <h3 className="text-sm font-bold text-neutral-900 uppercase tracking-wider flex items-center gap-2">
+              <span className="bg-neutral-900 text-white w-5 h-5 rounded-full text-xs flex items-center justify-center">1</span>
+              <span>Customer Details</span>
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 mb-1">Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-700 mb-1">Phone Number</label>
+                <input
+                  type="text"
+                  required
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-neutral-700 mb-1">Delivery Address in Tashkent</label>
+              <textarea
+                rows={2}
+                required
+                value={deliveryAddress}
+                onChange={(e) => setDeliveryAddress(e.target.value)}
+                className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-neutral-900"
+              />
+            </div>
+          </div>
+
+          {/* Delivery & Payment Selection */}
+          <div className="bg-white p-6 rounded-2xl border border-neutral-200 space-y-4 shadow-sm">
+            <h3 className="text-sm font-bold text-neutral-900 uppercase tracking-wider flex items-center gap-2">
+              <span className="bg-neutral-900 text-white w-5 h-5 rounded-full text-xs flex items-center justify-center">2</span>
+              <span>Delivery & Payment Methods</span>
+            </h3>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-neutral-700">Delivery Method</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeliveryMethod('STANDARD')}
+                  className={`p-3 rounded-xl border text-left text-xs space-y-1 transition-all ${
+                    deliveryMethod === 'STANDARD' ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-200 bg-neutral-50 text-neutral-800'
+                  }`}
+                >
+                  <div className="font-bold flex items-center gap-1.5">
+                    <Truck className="w-4 h-4" />
+                    <span>Standard Express</span>
+                  </div>
+                  <p className="opacity-80 text-[11px]">Deliver within 24 hours</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeliveryMethod('EXPRESS_COURIER')}
+                  className={`p-3 rounded-xl border text-left text-xs space-y-1 transition-all ${
+                    deliveryMethod === 'EXPRESS_COURIER' ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-200 bg-neutral-50 text-neutral-800'
+                  }`}
+                >
+                  <div className="font-bold flex items-center gap-1.5">
+                    <Truck className="w-4 h-4 text-amber-400" />
+                    <span>Same-Day Courier</span>
+                  </div>
+                  <p className="opacity-80 text-[11px]">Deliver within 3 hours</p>
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <label className="block text-xs font-semibold text-neutral-700">Payment Provider Adapter</label>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  { id: 'CASH', label: 'Cash on Delivery' },
+                  { id: 'PAYME', label: 'Payme / Click' },
+                  { id: 'CARD', label: 'Bank Card' },
+                ].map((pm) => (
+                  <button
+                    key={pm.id}
+                    type="button"
+                    onClick={() => setPaymentMethod(pm.id)}
+                    className={`p-3 rounded-xl border text-center text-xs font-bold transition-all ${
+                      paymentMethod === pm.id ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-200 bg-neutral-50 text-neutral-800'
+                    }`}
+                  >
+                    {pm.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-neutral-700 mb-1">Order Notes (Optional)</label>
+              <input
+                type="text"
+                value={orderNotes}
+                onChange={(e) => setOrderNotes(e.target.value)}
+                placeholder="Special delivery instructions for seller..."
+                className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs focus:outline-none"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Right Summary Column (5 cols) */}
+        <div className="lg:col-span-5 space-y-6">
+          <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm space-y-4 sticky top-20">
+            <h3 className="text-base font-serif font-bold text-neutral-900 border-b border-neutral-100 pb-3">
+              Order Breakdown ({Object.keys(grouped).length} Sellers)
+            </h3>
+
+            {/* Store Sub-Orders List */}
+            <div className="space-y-3">
+              {Object.entries(grouped).map(([storeId, group], index) => (
+                <div key={storeId} className="bg-neutral-50 p-3 rounded-xl border border-neutral-200/80 text-xs space-y-1">
+                  <div className="font-bold text-neutral-900 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Store className="w-3.5 h-3.5 text-amber-800" />
+                      <span>Sub-Order #{index + 1}: {group.storeName}</span>
+                    </span>
+                    <span>{group.subtotal.toLocaleString()} UZS</span>
+                  </div>
+
+                  <ul className="text-neutral-500 space-y-0.5 pt-1 text-[11px]">
+                    {group.items.map((it) => (
+                      <li key={it.id}>• {it.name} (x{it.quantity})</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+
+            <hr className="border-neutral-100" />
+
+            <div className="flex justify-between items-baseline">
+              <span className="text-sm font-bold text-neutral-900">Total Amount:</span>
+              <span className="text-2xl font-bold text-neutral-900">{grandTotal.toLocaleString()} UZS</span>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full bg-neutral-900 hover:bg-neutral-800 disabled:bg-neutral-400 text-white font-bold py-3.5 rounded-xl text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2"
+            >
+              {isSubmitting ? 'Processing Order...' : 'Place Multi-Vendor Order →'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}

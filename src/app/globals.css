@@ -1,0 +1,23 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+@layer base {
+  body {
+    @apply bg-[#FAF9F6] text-[#1A1A1A] antialiased selection:bg-[#C28355] selection:text-white;
+  }
+}
+
+/* Custom fashion image studio styles */
+.studio-image-frame {
+  background: radial-gradient(circle, #ffffff 60%, #f4efe6 100%);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #d0a27b;
+  border-radius: 9999px;
+}
