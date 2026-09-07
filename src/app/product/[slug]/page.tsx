@@ -63,7 +63,9 @@ export default function ProductDetailPage({ params }: ProductPageProps) {
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-bold text-neutral-900">{product.storeName}</h3>
-              <ShieldCheck className="w-4 h-4 text-emerald-600" title="Verified Marketplace Store" />
+              <span title="Verified Marketplace Store">
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              </span>
             </div>
             <p className="text-xs text-neutral-500 flex items-center gap-3 mt-1">
               <span className="flex items-center gap-1">
