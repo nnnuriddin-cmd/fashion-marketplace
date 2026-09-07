@@ -1,45 +1,33 @@
 import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import ProductCard from '@/components/customer/ProductCard';
 import StoreCard from '@/components/customer/StoreCard';
 import { ArrowRight, Sparkles, Send, ShieldCheck, Flame, ShoppingBag } from 'lucide-react';
 
 export const revalidate = 0; // Fresh dynamic catalog retrieval
 
-export default function HomePage() {
-  const db = getDb();
+export default async function HomePage() {
+  const [storesResult, productsResult] = await Promise.all([
+    supabase.from('stores').select('*').eq('status', 'APPROVED').limit(6),
+    supabase.from('products').select('*, stores(name, slug)').eq('status', 'ACTIVE').limit(16),
+  ]);
 
-  // Fetch data from database
-  const stores = db.prepare(`SELECT * FROM stores WHERE status = 'APPROVED' LIMIT 6`).all() as any[];
+  if (storesResult.error || productsResult.error) {
+    throw storesResult.error || productsResult.error;
+  }
 
-  const featuredProducts = db.prepare(`
-    SELECT p.*, s.name as storeName, s.slug as storeSlug
-    FROM products p
-    JOIN stores s ON p.storeId = s.id
-    WHERE p.status = 'PUBLISHED'
-    ORDER BY p.isFeatured DESC, p.viewsCount DESC
-    LIMIT 8
-  `).all() as any[];
-
-  const womensProducts = db.prepare(`
-    SELECT p.*, s.name as storeName, s.slug as storeSlug
-    FROM products p
-    JOIN stores s ON p.storeId = s.id
-    WHERE p.status = 'PUBLISHED' AND p.gender = 'WOMEN'
-    LIMIT 4
-  `).all() as any[];
-
-  const mensProducts = db.prepare(`
-    SELECT p.*, s.name as storeName, s.slug as storeSlug
-    FROM products p
-    JOIN stores s ON p.storeId = s.id
-    WHERE p.status = 'PUBLISHED' AND p.gender = 'MEN'
-    LIMIT 4
-  `).all() as any[];
-
-  const brands = db.prepare(`SELECT * FROM brands LIMIT 8`).all() as any[];
+  const stores = storesResult.data ?? [];
+  const products = (productsResult.data ?? []).map((product: any) => ({
+    ...product,
+    storeName: product.stores?.name,
+    storeSlug: product.stores?.slug,
+  }));
+  const featuredProducts = products.slice(0, 8);
+  const womensProducts = products.filter((product: any) => product.meta?.gender === 'WOMEN').slice(0, 4);
+  const mensProducts = products.filter((product: any) => product.meta?.gender === 'MEN').slice(0, 4);
+  const brands: any[] = [];
 
   return (
     <div className="space-y-16 pb-16">

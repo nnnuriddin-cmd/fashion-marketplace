@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
   try {
     const { storeId, action } = await req.json();
-    const db = getDb();
-
     if (!storeId || !action) {
       return NextResponse.json({ error: 'Missing parameters.' }, { status: 400 });
     }
@@ -14,7 +12,12 @@ export async function POST(req: NextRequest) {
     if (action === 'REJECT') status = 'REJECTED';
     if (action === 'SUSPEND') status = 'SUSPENDED';
 
-    db.prepare(`UPDATE stores SET status = ? WHERE id = ?`).run(status, storeId);
+    const { error } = await supabase
+      .from('stores')
+      .update({ status })
+      .eq('id', storeId);
+
+    if (error) throw error;
 
     return NextResponse.json({ success: true, storeId, status });
   } catch (err) {

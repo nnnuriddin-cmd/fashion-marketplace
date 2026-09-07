@@ -2,7 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { notFound } from 'next/navigation';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import ProductDetailClient from '@/components/customer/ProductDetailClient';
 import ProductCard from '@/components/customer/ProductCard';
 import { Store, ShieldCheck, MapPin, Star } from 'lucide-react';
@@ -15,32 +15,36 @@ interface ProductPageProps {
   };
 }
 
-export default function ProductDetailPage({ params }: ProductPageProps) {
-  const db = getDb();
+export default async function ProductDetailPage({ params }: ProductPageProps) {
+  const { data: rawProduct, error } = await supabase
+    .from('products')
+    .select('*, stores(name, slug, logo, location, rating)')
+    .or(`slug.eq.${params.slug},id.eq.${params.slug}`)
+    .maybeSingle();
 
-  const product = db.prepare(`
-    SELECT p.*, s.name as storeName, s.slug as storeSlug, s.logo as storeLogo, s.location as storeLocation, s.rating as storeRating, b.name as brandName
-    FROM products p
-    JOIN stores s ON p.storeId = s.id
-    LEFT JOIN brands b ON p.brandId = b.id
-    WHERE p.slug = ? OR p.id = ?
-  `).get(params.slug, params.slug) as any;
+  if (error) throw error;
+  const product = rawProduct && {
+    ...rawProduct,
+    storeName: rawProduct.stores?.name,
+    storeSlug: rawProduct.stores?.slug,
+    storeLogo: rawProduct.stores?.logo,
+    storeLocation: rawProduct.stores?.location,
+    storeRating: rawProduct.stores?.rating,
+  };
 
   if (!product) {
     notFound();
   }
 
-  // Increment views counter
-  db.prepare(`UPDATE products SET viewsCount = viewsCount + 1 WHERE id = ?`).run(product.id);
-
-  // Fetch similar products in same category
-  const similarProducts = db.prepare(`
-    SELECT p.*, s.name as storeName, s.slug as storeSlug
-    FROM products p
-    JOIN stores s ON p.storeId = s.id
-    WHERE p.categoryId = ? AND p.id != ? AND p.status = 'PUBLISHED'
-    LIMIT 4
-  `).all(product.categoryId, product.id) as any[];
+  const { data: similarData, error: similarError } = await supabase
+    .from('products')
+    .select('*, stores(name, slug)')
+    .eq('category_id', product.category_id)
+    .neq('id', product.id)
+    .eq('status', 'ACTIVE')
+    .limit(4);
+  if (similarError) throw similarError;
+  const similarProducts = (similarData ?? []).map((item: any) => ({ ...item, storeName: item.stores?.name, storeSlug: item.stores?.slug }));
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-16">

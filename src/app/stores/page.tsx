@@ -1,13 +1,19 @@
 import React from 'react';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import StoreCard from '@/components/customer/StoreCard';
 import { Store as StoreIcon, ShieldCheck } from 'lucide-react';
 
 export const revalidate = 0;
 
-export default function StoresDirectoryPage() {
-  const db = getDb();
-  const stores = db.prepare(`SELECT * FROM stores WHERE status = 'APPROVED' ORDER BY rating DESC`).all() as any[];
+export default async function StoresDirectoryPage() {
+  const { data, error } = await supabase
+    .from('stores')
+    .select('*')
+    .eq('status', 'APPROVED')
+    .order('rating', { ascending: false });
+
+  if (error) throw error;
+  const stores = data ?? [];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">

@@ -2,7 +2,7 @@ import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import ProductCard from '@/components/customer/ProductCard';
 import { MapPin, Phone, Send, Star, ShieldCheck, ShoppingBag, Store as StoreIcon } from 'lucide-react';
 
@@ -18,45 +18,25 @@ interface StorePageProps {
   };
 }
 
-export default function StoreFrontpage({ params, searchParams }: StorePageProps) {
-  const db = getDb();
-
-  const store = db.prepare(`SELECT * FROM stores WHERE slug = ? OR id = ?`).get(params.slug, params.slug) as any;
+export default async function StoreFrontpage({ params, searchParams }: StorePageProps) {
+  const { data: store, error: storeError } = await supabase
+    .from('stores')
+    .select('*')
+    .or(`slug.eq.${params.slug},id.eq.${params.slug}`)
+    .maybeSingle();
+  if (storeError) throw storeError;
 
   if (!store) {
     notFound();
   }
 
-  // Fetch store products
-  let sql = `
-    SELECT p.*, s.name as storeName, s.slug as storeSlug
-    FROM products p
-    JOIN stores s ON p.storeId = s.id
-    WHERE p.storeId = ? AND p.status = 'PUBLISHED'
-  `;
-  const sqlParams: any[] = [store.id];
-
-  if (searchParams.category) {
-    sql += ` AND p.categoryId IN (SELECT id FROM categories WHERE slug = ?)`;
-    sqlParams.push(searchParams.category);
-  }
-
-  if (searchParams.q) {
-    sql += ` AND (p.name LIKE ? OR p.description LIKE ?)`;
-    sqlParams.push(`%${searchParams.q}%`, `%${searchParams.q}%`);
-  }
-
-  sql += ` ORDER BY p.createdAt DESC`;
-
-  const products = db.prepare(sql).all(...sqlParams) as any[];
-
-  // Fetch categories present in this store
-  const storeCategories = db.prepare(`
-    SELECT DISTINCT c.id, c.name, c.slug
-    FROM categories c
-    JOIN products p ON c.id = p.categoryId
-    WHERE p.storeId = ? AND p.status = 'PUBLISHED'
-  `).all(store.id) as any[];
+  let query = supabase.from('products').select('*, categories(id, name, slug)').eq('store_id', store.id).eq('status', 'ACTIVE').order('created_at', { ascending: false });
+  if (searchParams.category) query = query.eq('categories.slug', searchParams.category);
+  if (searchParams.q) query = query.or(`title.ilike.%${searchParams.q}%,description.ilike.%${searchParams.q}%`);
+  const { data: productData, error: productsError } = await query;
+  if (productsError) throw productsError;
+  const products = productData ?? [];
+  const storeCategories = Array.from(new Map(products.filter((product: any) => product.categories).map((product: any) => [product.categories.id, product.categories])).values());
 
   return (
     <div className="space-y-10 pb-16">
