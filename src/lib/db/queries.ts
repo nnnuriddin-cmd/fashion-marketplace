@@ -1,4 +1,5 @@
 import { supabase } from '../supabase';
+import { getServerSupabase } from '../supabase-server';
 
 // ============================================================================
 // TypeScript Types & Interfaces (Matching 002_full_schema.sql)
@@ -691,6 +692,10 @@ export async function createOrderTransaction(
     throw new Error('Cannot create an order with empty cartItems');
   }
 
+  // Obtain dedicated server-side client with service_role privileges
+  // for checkout mutations (RLS allows INSERT only via backend authority)
+  const serverSupabase = getServerSupabase();
+
   // 1. Fetch actual products from DB to verify existence, prices, and stock
   // Client-supplied prices MUST NOT be trusted.
   const productIds = Array.from(
@@ -701,7 +706,7 @@ export async function createOrderTransaction(
     throw new Error('All cart items must contain a valid productId for checkout validation');
   }
 
-  const { data: dbProducts, error: prodErr } = await supabase
+  const { data: dbProducts, error: prodErr } = await serverSupabase
     .from('products')
     .select('id, title, store_id, price, discount_price, stock_quantity, original_image, status')
     .in('id', productIds);
@@ -781,10 +786,10 @@ export async function createOrderTransaction(
     totalAmount += lineTotal;
   }
 
-  // 2. Create parent order
+  // 2. Create parent order via serverSupabase client (bypasses RLS INSERT restriction safely on backend)
   const orderNumber = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
 
-  const { data: parentOrder, error: parentError } = await supabase
+  const { data: parentOrder, error: parentError } = await serverSupabase
     .from('parent_orders')
     .insert([
       {
@@ -809,7 +814,7 @@ export async function createOrderTransaction(
 
   // 3. Fetch commission rates for participating stores
   const storeIds = Object.keys(storeGroups);
-  const { data: storesData } = await supabase
+  const { data: storesData } = await serverSupabase
     .from('stores')
     .select('id, commission_rate')
     .in('id', storeIds);
@@ -821,7 +826,7 @@ export async function createOrderTransaction(
     }
   }
 
-  // 4. Create seller orders and line items
+  // 4. Create seller orders and line items via serverSupabase
   const sellerLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
   let letterIdx = 0;
   const createdSellerOrdersResult: CreateOrderCheckoutResult['sellerOrders'] = [];
@@ -834,7 +839,7 @@ export async function createOrderTransaction(
     const commissionAmount = Math.round(((group.subtotal * commRate) / 100) * 100) / 100;
     const sellerEarnings = group.subtotal - commissionAmount;
 
-    const { data: sellerOrder, error: sellerError } = await supabase
+    const { data: sellerOrder, error: sellerError } = await serverSupabase
       .from('seller_orders')
       .insert([
         {
@@ -867,7 +872,7 @@ export async function createOrderTransaction(
       subtotal: item.lineTotal,
     }));
 
-    const { error: itemsError } = await supabase
+    const { error: itemsError } = await serverSupabase
       .from('order_items')
       .insert(itemsPayload);
 
