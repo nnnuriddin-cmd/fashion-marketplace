@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { getDb } from '@/lib/db';
+import { searchProducts, getRootCategories, getBrands, getAllApprovedStores } from '@/lib/db';
 import ProductCard from '@/components/customer/ProductCard';
 import { Filter, SlidersHorizontal, Search as SearchIcon, RotateCcw, Sparkles } from 'lucide-react';
 
@@ -24,9 +24,7 @@ interface SearchPageProps {
   };
 }
 
-export default function SearchPage({ searchParams }: SearchPageProps) {
-  const db = getDb();
-
+export default async function SearchPage({ searchParams }: SearchPageProps) {
   const {
     q,
     category,
@@ -35,103 +33,93 @@ export default function SearchPage({ searchParams }: SearchPageProps) {
     maxPrice,
     brand,
     store,
-    color,
-    size,
-    style,
-    occasion,
     sale,
     sort,
   } = searchParams;
 
-  // Build dynamic SQL query
-  let sql = `
-    SELECT p.*, s.name as storeName, s.slug as storeSlug, c.name as categoryName
-    FROM products p
-    JOIN stores s ON p.storeId = s.id
-    JOIN categories c ON p.categoryId = c.id
-    WHERE p.status = 'PUBLISHED'
-  `;
-
-  const params: any[] = [];
-
-  if (q) {
-    sql += ` AND (p.name LIKE ? OR p.description LIKE ? OR p.tags LIKE ? OR s.name LIKE ?)`;
-    const term = `%${q}%`;
-    params.push(term, term, term, term);
+  // 1. Fetch products using Supabase DB layer
+  let rawProducts: Record<string, unknown>[] = [];
+  try {
+    rawProducts = await searchProducts({
+      query: q,
+      categorySlug: category,
+      brandSlug: brand,
+      gender: gender ? gender.toUpperCase() : undefined,
+      minPrice: minPrice ? parseFloat(minPrice) : undefined,
+      maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
+      status: 'ACTIVE',
+      limit: 60,
+    });
+  } catch (error) {
+    console.error('Error fetching search products from Supabase:', error);
+    throw new Error(`Failed to load search products: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  if (gender) {
-    sql += ` AND (p.gender = ? OR p.gender = 'UNISEX')`;
-    params.push(gender.toUpperCase());
+  // 2. Fetch categories, brands, and approved stores concurrently
+  let allCategories: Awaited<ReturnType<typeof getRootCategories>> = [];
+  let allBrands: Awaited<ReturnType<typeof getBrands>> = [];
+  let allStores: Awaited<ReturnType<typeof getAllApprovedStores>> = [];
+
+  try {
+    const [categoriesRes, brandsRes, storesRes] = await Promise.all([
+      getRootCategories(),
+      getBrands(),
+      getAllApprovedStores(),
+    ]);
+    allCategories = categoriesRes;
+    allBrands = brandsRes;
+    allStores = storesRes;
+  } catch (error) {
+    console.error('Error fetching filter facets from Supabase:', error);
+    throw new Error(`Failed to load search filter options: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  if (category) {
-    sql += ` AND (c.slug = ? OR c.parentId IN (SELECT id FROM categories WHERE slug = ?))`;
-    params.push(category, category);
-  }
-
-  if (brand) {
-    sql += ` AND p.brandId IN (SELECT id FROM brands WHERE slug = ?)`;
-    params.push(brand);
-  }
+  // 3. Client-side-compatible in-memory filtering for store, sale, and sorting
+  let filteredProducts = rawProducts;
 
   if (store) {
-    sql += ` AND (s.slug = ? OR s.id = ?)`;
-    params.push(store, store);
-  }
-
-  if (minPrice) {
-    sql += ` AND p.price >= ?`;
-    params.push(parseFloat(minPrice));
-  }
-
-  if (maxPrice) {
-    sql += ` AND p.price <= ?`;
-    params.push(parseFloat(maxPrice));
-  }
-
-  if (color) {
-    sql += ` AND p.colors LIKE ?`;
-    params.push(`%${color}%`);
-  }
-
-  if (size) {
-    sql += ` AND p.sizes LIKE ?`;
-    params.push(`%${size}%`);
-  }
-
-  if (style) {
-    sql += ` AND p.style LIKE ?`;
-    params.push(`%${style}%`);
-  }
-
-  if (occasion) {
-    sql += ` AND p.occasion LIKE ?`;
-    params.push(`%${occasion}%`);
+    filteredProducts = filteredProducts.filter((p) => {
+      const storeObj = p.stores as { id?: string; slug?: string } | undefined;
+      return storeObj?.slug === store || storeObj?.id === store || p.store_id === store;
+    });
   }
 
   if (sale === 'true') {
-    sql += ` AND p.discountPrice IS NOT NULL`;
+    filteredProducts = filteredProducts.filter((p) => p.discount_price !== null && p.discount_price !== undefined);
   }
 
   // Sorting
   if (sort === 'price_asc') {
-    sql += ` ORDER BY p.price ASC`;
+    filteredProducts.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
   } else if (sort === 'price_desc') {
-    sql += ` ORDER BY p.price DESC`;
+    filteredProducts.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
   } else if (sort === 'popular') {
-    sql += ` ORDER BY p.viewsCount DESC, p.isTrending DESC`;
-  } else {
-    sql += ` ORDER BY p.createdAt DESC`;
+    filteredProducts.sort((a, b) => Number(b.views_count || 0) - Number(a.views_count || 0));
   }
 
-  sql += ` LIMIT 60`;
-
-  const products = db.prepare(sql).all(...params) as any[];
-
-  const allCategories = db.prepare(`SELECT * FROM categories WHERE parentId IS NULL`).all() as any[];
-  const allBrands = db.prepare(`SELECT * FROM brands`).all() as any[];
-  const allStores = db.prepare(`SELECT id, name, slug FROM stores WHERE status = 'APPROVED'`).all() as any[];
+  // 4. Map to ProductCard expected props
+  const products = filteredProducts.map((p) => {
+    const storeObj = p.stores as { name?: string; slug?: string } | undefined;
+    return {
+      id: String(p.id),
+      storeId: String(p.store_id || ''),
+      storeName: storeObj?.name || 'Boutique',
+      storeSlug: storeObj?.slug || 'boutique',
+      name: String(p.title || p.name || 'Product'),
+      slug: String(p.slug || ''),
+      price: Number(p.price || 0),
+      discountPrice: p.discount_price !== null && p.discount_price !== undefined ? Number(p.discount_price) : null,
+      currency: String(p.currency || 'UZS'),
+      originalImage: String(p.original_image || p.image || 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=800&q=80'),
+      processedImages: typeof p.processed_images === 'string' ? p.processed_images : JSON.stringify(p.processed_images || []),
+      sizes: typeof p.sizes === 'string' ? p.sizes : JSON.stringify(p.sizes || []),
+      colors: typeof p.colors === 'string' ? p.colors : JSON.stringify(p.colors || []),
+      gender: (p.gender as string) || undefined,
+      style: (p.style as string) || undefined,
+      isFeatured: Boolean(p.is_featured),
+      isTrending: Boolean(p.is_trending),
+    };
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -166,9 +154,15 @@ export default function SearchPage({ searchParams }: SearchPageProps) {
             />
             <SearchIcon className="w-4 h-4 text-neutral-400 absolute left-3.5 top-3.5" />
           </div>
+          {/* Preserve existing filters when submitting search keyword */}
+          {gender && <input type="hidden" name="gender" value={gender} />}
+          {category && <input type="hidden" name="category" value={category} />}
+          {brand && <input type="hidden" name="brand" value={brand} />}
+          {store && <input type="hidden" name="store" value={store} />}
+          {sort && <input type="hidden" name="sort" value={sort} />}
           <button
             type="submit"
-            className="bg-neutral-900 hover:bg-neutral-800 text-white font-semibold px-6 py-2.5 rounded-xl text-xs uppercase tracking-wider"
+            className="bg-neutral-900 hover:bg-neutral-800 text-white font-semibold px-6 py-2.5 rounded-xl text-xs uppercase tracking-wider transition-colors"
           >
             Search
           </button>
@@ -198,19 +192,27 @@ export default function SearchPage({ searchParams }: SearchPageProps) {
                 { label: "Women's", value: 'WOMEN' },
                 { label: "Men's", value: 'MEN' },
                 { label: 'Unisex', value: 'UNISEX' },
-              ].map((g) => (
-                <Link
-                  key={g.label}
-                  href={`/search?${new URLSearchParams({ ...searchParams, gender: g.value }).toString()}`}
-                  className={`text-xs px-3 py-1 rounded-full border transition-all ${
-                    (gender || '') === g.value
-                      ? 'bg-neutral-900 text-white border-neutral-900 font-semibold'
-                      : 'bg-neutral-50 text-neutral-700 border-neutral-200 hover:border-neutral-400'
-                  }`}
-                >
-                  {g.label}
-                </Link>
-              ))}
+              ].map((g) => {
+                const params = new URLSearchParams({ ...searchParams });
+                if (g.value) {
+                  params.set('gender', g.value);
+                } else {
+                  params.delete('gender');
+                }
+                return (
+                  <Link
+                    key={g.label}
+                    href={`/search?${params.toString()}`}
+                    className={`text-xs px-3 py-1 rounded-full border transition-all ${
+                      (gender || '') === g.value
+                        ? 'bg-neutral-900 text-white border-neutral-900 font-semibold'
+                        : 'bg-neutral-50 text-neutral-700 border-neutral-200 hover:border-neutral-400'
+                    }`}
+                  >
+                    {g.label}
+                  </Link>
+                );
+              })}
             </div>
           </div>
 
@@ -219,79 +221,125 @@ export default function SearchPage({ searchParams }: SearchPageProps) {
             <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider">Category</h4>
             <ul className="space-y-1 text-xs">
               <li>
-                <Link
-                  href={`/search?${new URLSearchParams({ ...searchParams, category: '' }).toString()}`}
-                  className={`block py-1 hover:text-amber-800 ${!category ? 'font-bold text-amber-800' : 'text-neutral-600'}`}
-                >
-                  All Categories
-                </Link>
+                {(() => {
+                  const params = new URLSearchParams({ ...searchParams });
+                  params.delete('category');
+                  return (
+                    <Link
+                      href={`/search?${params.toString()}`}
+                      className={`block py-1 hover:text-amber-800 ${!category ? 'font-bold text-amber-800' : 'text-neutral-600'}`}
+                    >
+                      All Categories
+                    </Link>
+                  );
+                })()}
               </li>
-              {allCategories.map((c) => (
-                <li key={c.id}>
-                  <Link
-                    href={`/search?${new URLSearchParams({ ...searchParams, category: c.slug }).toString()}`}
-                    className={`block py-1 hover:text-amber-800 ${category === c.slug ? 'font-bold text-amber-800' : 'text-neutral-600'}`}
-                  >
-                    {c.name}
-                  </Link>
-                </li>
-              ))}
+              {allCategories.map((c) => {
+                const params = new URLSearchParams({ ...searchParams });
+                params.set('category', c.slug);
+                return (
+                  <li key={c.id}>
+                    <Link
+                      href={`/search?${params.toString()}`}
+                      className={`block py-1 hover:text-amber-800 ${category === c.slug ? 'font-bold text-amber-800' : 'text-neutral-600'}`}
+                    >
+                      {c.name}
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           </div>
 
           {/* Stores Filter */}
           <div className="space-y-2">
             <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider">Store / Boutique</h4>
-            <select
-              defaultValue={store || ''}
-              onChange={(e) => {
-                window.location.href = `/search?${new URLSearchParams({ ...searchParams, store: e.target.value }).toString()}`;
-              }}
-              className="w-full bg-neutral-50 border border-neutral-200 rounded-lg p-2 text-xs focus:outline-none"
-            >
-              <option value="">All Stores</option>
-              {allStores.map((s) => (
-                <option key={s.id} value={s.slug}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-col gap-1 text-xs max-h-48 overflow-y-auto pr-1">
+              {(() => {
+                const params = new URLSearchParams({ ...searchParams });
+                params.delete('store');
+                return (
+                  <Link
+                    href={`/search?${params.toString()}`}
+                    className={`block py-1 px-2 rounded hover:bg-neutral-100 ${!store ? 'font-bold text-amber-800 bg-amber-50' : 'text-neutral-600'}`}
+                  >
+                    All Stores
+                  </Link>
+                );
+              })()}
+              {allStores.map((s) => {
+                const params = new URLSearchParams({ ...searchParams });
+                params.set('store', s.slug);
+                return (
+                  <Link
+                    key={s.id}
+                    href={`/search?${params.toString()}`}
+                    className={`block py-1 px-2 rounded hover:bg-neutral-100 truncate ${store === s.slug ? 'font-bold text-amber-800 bg-amber-50' : 'text-neutral-600'}`}
+                  >
+                    {s.name}
+                  </Link>
+                );
+              })}
+            </div>
           </div>
 
           {/* Brands Filter */}
           <div className="space-y-2">
             <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider">Brand</h4>
-            <select
-              defaultValue={brand || ''}
-              onChange={(e) => {
-                window.location.href = `/search?${new URLSearchParams({ ...searchParams, brand: e.target.value }).toString()}`;
-              }}
-              className="w-full bg-neutral-50 border border-neutral-200 rounded-lg p-2 text-xs focus:outline-none"
-            >
-              <option value="">All Brands</option>
-              {allBrands.map((b) => (
-                <option key={b.id} value={b.slug}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-col gap-1 text-xs max-h-48 overflow-y-auto pr-1">
+              {(() => {
+                const params = new URLSearchParams({ ...searchParams });
+                params.delete('brand');
+                return (
+                  <Link
+                    href={`/search?${params.toString()}`}
+                    className={`block py-1 px-2 rounded hover:bg-neutral-100 ${!brand ? 'font-bold text-amber-800 bg-amber-50' : 'text-neutral-600'}`}
+                  >
+                    All Brands
+                  </Link>
+                );
+              })()}
+              {allBrands.map((b) => {
+                const params = new URLSearchParams({ ...searchParams });
+                params.set('brand', b.slug);
+                return (
+                  <Link
+                    key={b.id}
+                    href={`/search?${params.toString()}`}
+                    className={`block py-1 px-2 rounded hover:bg-neutral-100 truncate ${brand === b.slug ? 'font-bold text-amber-800 bg-amber-50' : 'text-neutral-600'}`}
+                  >
+                    {b.name}
+                  </Link>
+                );
+              })}
+            </div>
           </div>
 
           {/* Sale Filter Toggle */}
           <div className="pt-2 border-t border-neutral-100 flex items-center justify-between">
             <span className="text-xs font-semibold text-neutral-900">Discounted / On Sale Only</span>
-            <Link
-              href={`/search?${new URLSearchParams({ ...searchParams, sale: sale === 'true' ? '' : 'true' }).toString()}`}
-              className={`w-9 h-5 rounded-full transition-colors relative flex items-center px-0.5 ${
-                sale === 'true' ? 'bg-rose-600' : 'bg-neutral-300'
-              }`}
-            >
-              <span
-                className={`w-4 h-4 bg-white rounded-full transition-transform ${
-                  sale === 'true' ? 'translate-x-4' : 'translate-x-0'
-                }`}
-              />
-            </Link>
+            {(() => {
+              const params = new URLSearchParams({ ...searchParams });
+              if (sale === 'true') {
+                params.delete('sale');
+              } else {
+                params.set('sale', 'true');
+              }
+              return (
+                <Link
+                  href={`/search?${params.toString()}`}
+                  className={`w-9 h-5 rounded-full transition-colors relative flex items-center px-0.5 ${
+                    sale === 'true' ? 'bg-rose-600' : 'bg-neutral-300'
+                  }`}
+                >
+                  <span
+                    className={`w-4 h-4 bg-white rounded-full transition-transform ${
+                      sale === 'true' ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </Link>
+              );
+            })()}
           </div>
         </aside>
 
@@ -303,20 +351,31 @@ export default function SearchPage({ searchParams }: SearchPageProps) {
               Showing <strong className="text-neutral-900">{products.length}</strong> items
             </span>
 
-            <div className="flex items-center gap-2">
-              <span className="text-neutral-500">Sort by:</span>
-              <select
-                defaultValue={sort || 'newest'}
-                onChange={(e) => {
-                  window.location.href = `/search?${new URLSearchParams({ ...searchParams, sort: e.target.value }).toString()}`;
-                }}
-                className="bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-1 text-xs font-semibold focus:outline-none"
-              >
-                <option value="newest">Newest Arrivals</option>
-                <option value="popular">Most Popular</option>
-                <option value="price_asc">Price: Low to High</option>
-                <option value="price_desc">Price: High to Low</option>
-              </select>
+            <div className="flex items-center gap-1 sm:gap-2">
+              <span className="text-neutral-500 hidden sm:inline">Sort:</span>
+              {[
+                { label: 'Newest', value: 'newest' },
+                { label: 'Popular', value: 'popular' },
+                { label: 'Price ↑', value: 'price_asc' },
+                { label: 'Price ↓', value: 'price_desc' },
+              ].map((s) => {
+                const params = new URLSearchParams({ ...searchParams });
+                params.set('sort', s.value);
+                const isActive = (sort || 'newest') === s.value;
+                return (
+                  <Link
+                    key={s.value}
+                    href={`/search?${params.toString()}`}
+                    className={`px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors ${
+                      isActive
+                        ? 'bg-neutral-900 text-white border-neutral-900'
+                        : 'bg-neutral-50 text-neutral-700 border-neutral-200 hover:border-neutral-400'
+                    }`}
+                  >
+                    {s.label}
+                  </Link>
+                );
+              })}
             </div>
           </div>
 
