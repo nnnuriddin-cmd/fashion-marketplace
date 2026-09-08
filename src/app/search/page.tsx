@@ -7,7 +7,7 @@ import { Filter, SlidersHorizontal, Search as SearchIcon, RotateCcw, Sparkles } 
 export const revalidate = 0;
 
 interface SearchPageProps {
-  searchParams: {
+  searchParams?: {
     q?: string;
     category?: string;
     gender?: string;
@@ -25,6 +25,7 @@ interface SearchPageProps {
 }
 
 export default async function SearchPage({ searchParams }: SearchPageProps) {
+  const safeSearchParams = searchParams || {};
   const {
     q,
     category,
@@ -35,7 +36,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     store,
     sale,
     sort,
-  } = searchParams;
+  } = safeSearchParams;
 
   // 1. Fetch products using Supabase DB layer
   let rawProducts: Record<string, unknown>[] = [];
@@ -52,7 +53,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     });
   } catch (error) {
     console.error('Error fetching search products from Supabase:', error);
-    throw new Error(`Failed to load search products: ${error instanceof Error ? error.message : String(error)}`);
+    rawProducts = [];
   }
 
   // 2. Fetch categories, brands, and approved stores concurrently
@@ -62,16 +63,27 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
   try {
     const [categoriesRes, brandsRes, storesRes] = await Promise.all([
-      getRootCategories(),
-      getBrands(),
-      getAllApprovedStores(),
+      getRootCategories().catch((err) => {
+        console.error('Error fetching categories from Supabase:', err);
+        return [];
+      }),
+      getBrands().catch((err) => {
+        console.error('Error fetching brands from Supabase:', err);
+        return [];
+      }),
+      getAllApprovedStores().catch((err) => {
+        console.error('Error fetching approved stores from Supabase:', err);
+        return [];
+      }),
     ]);
     allCategories = categoriesRes;
     allBrands = brandsRes;
     allStores = storesRes;
   } catch (error) {
     console.error('Error fetching filter facets from Supabase:', error);
-    throw new Error(`Failed to load search filter options: ${error instanceof Error ? error.message : String(error)}`);
+    allCategories = [];
+    allBrands = [];
+    allStores = [];
   }
 
   // 3. Client-side-compatible in-memory filtering for store, sale, and sorting
@@ -98,8 +110,32 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   }
 
   // 4. Map to ProductCard expected props
+  const fallbackImage = 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=800&q=80';
+
   const products = filteredProducts.map((p) => {
     const storeObj = p.stores as { name?: string; slug?: string } | undefined;
+
+    // Resolve safe non-empty original image URL
+    const rawImageCandidate = (p.original_image || p.image) as string | null | undefined;
+    const resolvedImage = typeof rawImageCandidate === 'string' && rawImageCandidate.trim() !== ''
+      ? rawImageCandidate.trim()
+      : fallbackImage;
+
+    // Sanitize processedImages so ProductCard never receives empty or invalid image URLs
+    let safeProcessedImages: string[] = [];
+    if (Array.isArray(p.processed_images)) {
+      safeProcessedImages = (p.processed_images as unknown[]).filter((img): img is string => typeof img === 'string' && img.trim() !== '');
+    } else if (typeof p.processed_images === 'string') {
+      try {
+        const parsed = JSON.parse(p.processed_images);
+        if (Array.isArray(parsed)) {
+          safeProcessedImages = parsed.filter((img): img is string => typeof img === 'string' && img.trim() !== '');
+        }
+      } catch {
+        safeProcessedImages = [];
+      }
+    }
+
     return {
       id: String(p.id),
       storeId: String(p.store_id || ''),
@@ -110,8 +146,8 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
       price: Number(p.price || 0),
       discountPrice: p.discount_price !== null && p.discount_price !== undefined ? Number(p.discount_price) : null,
       currency: String(p.currency || 'UZS'),
-      originalImage: String(p.original_image || p.image || 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=800&q=80'),
-      processedImages: typeof p.processed_images === 'string' ? p.processed_images : JSON.stringify(p.processed_images || []),
+      originalImage: resolvedImage,
+      processedImages: JSON.stringify(safeProcessedImages.length > 0 ? safeProcessedImages : [resolvedImage]),
       sizes: typeof p.sizes === 'string' ? p.sizes : JSON.stringify(p.sizes || []),
       colors: typeof p.colors === 'string' ? p.colors : JSON.stringify(p.colors || []),
       gender: (p.gender as string) || undefined,
@@ -193,7 +229,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                 { label: "Men's", value: 'MEN' },
                 { label: 'Unisex', value: 'UNISEX' },
               ].map((g) => {
-                const params = new URLSearchParams({ ...searchParams });
+                const params = new URLSearchParams({ ...safeSearchParams });
                 if (g.value) {
                   params.set('gender', g.value);
                 } else {
@@ -222,7 +258,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             <ul className="space-y-1 text-xs">
               <li>
                 {(() => {
-                  const params = new URLSearchParams({ ...searchParams });
+                  const params = new URLSearchParams({ ...safeSearchParams });
                   params.delete('category');
                   return (
                     <Link
@@ -235,7 +271,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                 })()}
               </li>
               {allCategories.map((c) => {
-                const params = new URLSearchParams({ ...searchParams });
+                const params = new URLSearchParams({ ...safeSearchParams });
                 params.set('category', c.slug);
                 return (
                   <li key={c.id}>
@@ -256,7 +292,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider">Store / Boutique</h4>
             <div className="flex flex-col gap-1 text-xs max-h-48 overflow-y-auto pr-1">
               {(() => {
-                const params = new URLSearchParams({ ...searchParams });
+                const params = new URLSearchParams({ ...safeSearchParams });
                 params.delete('store');
                 return (
                   <Link
@@ -268,7 +304,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                 );
               })()}
               {allStores.map((s) => {
-                const params = new URLSearchParams({ ...searchParams });
+                const params = new URLSearchParams({ ...safeSearchParams });
                 params.set('store', s.slug);
                 return (
                   <Link
@@ -288,7 +324,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider">Brand</h4>
             <div className="flex flex-col gap-1 text-xs max-h-48 overflow-y-auto pr-1">
               {(() => {
-                const params = new URLSearchParams({ ...searchParams });
+                const params = new URLSearchParams({ ...safeSearchParams });
                 params.delete('brand');
                 return (
                   <Link
@@ -300,7 +336,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                 );
               })()}
               {allBrands.map((b) => {
-                const params = new URLSearchParams({ ...searchParams });
+                const params = new URLSearchParams({ ...safeSearchParams });
                 params.set('brand', b.slug);
                 return (
                   <Link
@@ -319,7 +355,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           <div className="pt-2 border-t border-neutral-100 flex items-center justify-between">
             <span className="text-xs font-semibold text-neutral-900">Discounted / On Sale Only</span>
             {(() => {
-              const params = new URLSearchParams({ ...searchParams });
+              const params = new URLSearchParams({ ...safeSearchParams });
               if (sale === 'true') {
                 params.delete('sale');
               } else {
@@ -359,7 +395,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                 { label: 'Price ↑', value: 'price_asc' },
                 { label: 'Price ↓', value: 'price_desc' },
               ].map((s) => {
-                const params = new URLSearchParams({ ...searchParams });
+                const params = new URLSearchParams({ ...safeSearchParams });
                 params.set('sort', s.value);
                 const isActive = (sort || 'newest') === s.value;
                 return (
