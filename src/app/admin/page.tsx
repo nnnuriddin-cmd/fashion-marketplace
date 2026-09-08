@@ -1,42 +1,87 @@
 import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { getDb } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
+import {
+  getAdminPlatformMetrics,
+  getAdminStoresList,
+  AdminPlatformMetrics,
+  AdminStoreListItem,
+} from '@/lib/db';
 import AdminStoreApprover from '@/components/admin/AdminStoreApprover';
-import { ShieldCheck, Store, ShoppingBag, Package, DollarSign, Users, Sparkles, CheckCircle } from 'lucide-react';
+import { ShieldCheck, Store, ShoppingBag, Package, DollarSign, Users, Sparkles, CheckCircle, AlertCircle } from 'lucide-react';
 
 export const revalidate = 0;
 
-export default function AdminDashboardPage() {
-  const db = getDb();
+export default async function AdminDashboardPage() {
+  // 1. In the current architecture, full Admin RBAC / auth session protection is not yet finalized.
+  // There is currently NO Admin role verification middleware or backend check.
+  // Checking supabase.auth.getUser() only checks for the presence of a Supabase Auth session, NOT admin privileges.
+  let authNotice: string | null = null;
+  try {
+    const { data: authData, error: authErr } = await supabase.auth.getUser();
+    if (authErr && !authErr.message.includes('missing') && !authErr.message.includes('Auth session missing')) {
+      authNotice = authErr.message;
+    }
+  } catch (err) {
+    authNotice = err instanceof Error ? err.message : String(err);
+  }
 
-  // Metrics
-  const storesCount = db.prepare(`SELECT COUNT(*) as count FROM stores`).get() as any;
-  const pendingStoresCount = db.prepare(`SELECT COUNT(*) as count FROM stores WHERE status = 'PENDING'`).get() as any;
-  const productsCount = db.prepare(`SELECT COUNT(*) as count FROM products WHERE status = 'PUBLISHED'`).get() as any;
-  const ordersCount = db.prepare(`SELECT COUNT(*) as count FROM parent_orders`).get() as any;
+  // 2. Fetch admin metrics and stores strictly via existing DB layer functions.
+  // We do NOT substitute fake zeros if data loading fails.
+  let metrics: AdminPlatformMetrics | null = null;
+  let allStores: AdminStoreListItem[] = [];
+  let loadError: string | null = null;
 
-  const gmv = db.prepare(`
-    SELECT SUM(totalAmount) as gmv FROM parent_orders
-  `).get() as any;
+  try {
+    const [platformMetrics, storesList] = await Promise.all([
+      getAdminPlatformMetrics(),
+      getAdminStoresList(),
+    ]);
 
-  const commission = db.prepare(`
-    SELECT SUM(commissionAmount) as commission FROM seller_orders
-  `).get() as any;
+    metrics = platformMetrics;
+    allStores = storesList;
+  } catch (err) {
+    console.error('Failed to load admin dashboard data from Supabase DB layer:', err);
+    loadError = err instanceof Error ? err.message : String(err);
+  }
 
-  const allStores = db.prepare(`
-    SELECT s.*, u.fullName as ownerName, u.email as ownerEmail
-    FROM stores s
-    JOIN users u ON s.ownerId = u.id
-    ORDER BY s.createdAt DESC
-  `).all() as any[];
+  // If loading platform metrics completely failed, render an explicit error state
+  // rather than displaying deceptive zeroed-out numbers.
+  if (loadError || !metrics) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div className="bg-rose-50 border border-rose-200 rounded-3xl p-8 max-w-xl mx-auto text-center space-y-4">
+          <div className="w-12 h-12 bg-rose-100 text-rose-700 rounded-full flex items-center justify-center mx-auto">
+            <AlertCircle className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold text-rose-900">Failed to Load Admin Dashboard</h2>
+          <p className="text-xs text-rose-700 leading-relaxed">
+            An error occurred while fetching platform metrics and store data through the database layer:
+          </p>
+          <div className="bg-white p-3 rounded-xl border border-rose-200 text-left font-mono text-[11px] text-rose-800 break-all">
+            {loadError || 'Unable to retrieve metrics from database layer.'}
+          </div>
+          <div className="pt-2">
+            <Link
+              href="/admin"
+              className="inline-block bg-neutral-900 text-white text-xs font-semibold px-5 py-2.5 rounded-xl hover:bg-neutral-800"
+            >
+              Retry
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const recentOrders = db.prepare(`
-    SELECT po.*, (SELECT COUNT(*) FROM seller_orders WHERE parentOrderId = po.id) as sellerCount
-    FROM parent_orders po
-    ORDER BY po.createdAt DESC
-    LIMIT 5
-  `).all() as any[];
+  // Map stores into the property shape expected by AdminStoreApprover client component
+  const initialStoresForApprover = allStores.map((s) => ({
+    ...s,
+    ownerName: s.owner_name || 'Unknown',
+    ownerEmail: s.owner_email || 'No email',
+    commissionRate: s.commission_rate,
+  }));
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -52,6 +97,13 @@ export default function AdminDashboardPage() {
         <p className="text-xs text-neutral-300 max-w-xl leading-relaxed">
           Manage seller approvals, product moderation, commission parameters, parent/child orders, and marketplace analytics.
         </p>
+
+        {authNotice && (
+          <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs px-3 py-2 rounded-xl flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Auth Notice: {authNotice}</span>
+          </div>
+        )}
       </div>
 
       {/* Metrics Row */}
@@ -61,7 +113,7 @@ export default function AdminDashboardPage() {
             <span>Marketplace GMV</span>
             <DollarSign className="w-4 h-4 text-emerald-600" />
           </div>
-          <div className="text-xl font-bold text-neutral-900">{(gmv?.gmv || 12450000).toLocaleString()} UZS</div>
+          <div className="text-xl font-bold text-neutral-900">{metrics.gmv.toLocaleString()} UZS</div>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-neutral-200 space-y-1 shadow-sm">
@@ -69,7 +121,7 @@ export default function AdminDashboardPage() {
             <span>Commission Revenue</span>
             <DollarSign className="w-4 h-4 text-amber-600" />
           </div>
-          <div className="text-xl font-bold text-neutral-900">{(commission?.commission || 1245000).toLocaleString()} UZS</div>
+          <div className="text-xl font-bold text-neutral-900">{metrics.totalCommission.toLocaleString()} UZS</div>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-neutral-200 space-y-1 shadow-sm">
@@ -77,9 +129,9 @@ export default function AdminDashboardPage() {
             <span>Active Sellers & Stores</span>
             <Store className="w-4 h-4 text-sky-600" />
           </div>
-          <div className="text-xl font-bold text-neutral-900">{storesCount.count || 10} Stores</div>
-          {pendingStoresCount.count > 0 && (
-            <div className="text-[11px] text-amber-800 font-bold">{pendingStoresCount.count} Pending Approval</div>
+          <div className="text-xl font-bold text-neutral-900">{metrics.storesCount} Stores</div>
+          {metrics.pendingStoresCount > 0 && (
+            <div className="text-[11px] text-amber-800 font-bold">{metrics.pendingStoresCount} Pending Approval</div>
           )}
         </div>
 
@@ -88,35 +140,36 @@ export default function AdminDashboardPage() {
             <span>Total Catalog Products</span>
             <ShoppingBag className="w-4 h-4 text-purple-600" />
           </div>
-          <div className="text-xl font-bold text-neutral-900">{productsCount.count || 115} Products</div>
+          <div className="text-xl font-bold text-neutral-900">{metrics.productsCount} Products</div>
         </div>
       </div>
 
       {/* Seller Approval & Management Section */}
-      <AdminStoreApprover initialStores={allStores} />
+      <AdminStoreApprover initialStores={initialStoresForApprover} />
 
       {/* All Marketplace Parent Orders */}
+      {/* 
+        NOTE: In the current DB layer (src/lib/db/queries.ts), there is NO query function 
+        for fetching global recent parent_orders for the Admin Dashboard.
+        Per strict constraints, direct Supabase calls (supabase.from) are not allowed in pages,
+        and modifying queries.ts is not permitted in this step.
+        This block displays a clear architectural status notice until an admin order query function is added.
+      */}
       <div className="bg-white rounded-3xl border border-neutral-200 p-6 space-y-4 shadow-sm">
-        <h3 className="text-lg font-serif font-bold text-neutral-900">Global Customer Orders</h3>
-        <div className="space-y-3">
-          {recentOrders.map((o) => (
-            <div key={o.id} className="bg-neutral-50 p-4 rounded-2xl border border-neutral-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-              <div>
-                <div className="font-bold text-neutral-900 font-mono">#{o.orderNumber}</div>
-                <div className="text-neutral-600">Customer: {o.customerName} ({o.customerPhone})</div>
-                <div className="text-neutral-400 text-[11px]">Address: {o.deliveryAddress}</div>
-              </div>
-
-              <div className="flex items-center gap-4">
-                <span className="bg-neutral-200 text-neutral-800 font-semibold px-2.5 py-1 rounded">
-                  {o.sellerCount} Seller Sub-Orders
-                </span>
-                <span className="font-bold text-neutral-900">{o.totalAmount.toLocaleString()} UZS</span>
-              </div>
-            </div>
-          ))}
+        <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+          <h3 className="text-lg font-serif font-bold text-neutral-900">Global Customer Orders</h3>
+          <span className="text-[11px] text-neutral-400 font-mono">DB Layer Integration Pending</span>
+        </div>
+        <div className="text-center py-8 px-4 text-neutral-500 text-xs bg-neutral-50 rounded-2xl border border-dashed border-neutral-200 space-y-2">
+          <p className="font-semibold text-neutral-700">Admin order listing function is not yet present in src/lib/db/queries.ts.</p>
+          <p className="text-neutral-500 max-w-md mx-auto">
+            Direct database queries from UI pages are forbidden to maintain clean architectural separation.
+            A dedicated query function (e.g. <code>getAdminRecentOrders()</code>) will be added to the DB layer in an authorized step.
+          </p>
         </div>
       </div>
     </div>
   );
 }
+
+
