@@ -6,6 +6,17 @@ import { sendTelegramMessage } from '@/lib/telegram/notifier';
 const menu = { keyboard: [[{ text: '➕ Add Product' }, { text: '📦 My Products' }]], resize_keyboard: true };
 
 export async function POST(request: NextRequest) {
+  // 1. Enforce Telegram Webhook Secret Token validation
+  const secretHeader = request.headers.get('x-telegram-bot-api-secret-token');
+  const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+
+  if (!expectedSecret || secretHeader !== expectedSecret) {
+    return NextResponse.json(
+      { error: 'Unauthorized webhook source' },
+      { status: 401 }
+    );
+  }
+
   try {
     const update = await request.json();
     if (update.callback_query?.data?.startsWith('language_')) {

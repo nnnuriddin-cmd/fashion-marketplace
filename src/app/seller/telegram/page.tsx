@@ -10,63 +10,25 @@ export default function SellerTelegramGuidePage() {
   const [simStep, setSimStep] = useState<'IDLE' | 'PROCESSING' | 'WAITING_DETAILS' | 'READY_PUBLISH' | 'PUBLISHED'>('IDLE');
   const [aiOutput, setAiOutput] = useState<any>(null);
 
-  const handleSimulatePhotoUpload = async () => {
+  const handleSimulatePhotoUpload = () => {
     setSimStep('PROCESSING');
-    try {
-      const res = await fetch('/api/telegram/webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: {
-            chat: { id: '111000' },
-            photo: [{ file_id: 'simulated_photo_id' }],
-          },
-        }),
-      });
-      const data = await res.json();
+    setTimeout(() => {
       setSimStep('WAITING_DETAILS');
-    } catch (e) {
-      console.error(e);
-      setSimStep('IDLE');
-    }
+    }, 500);
   };
 
-  const handleSimulateTextSubmit = async () => {
+  const handleSimulateTextSubmit = () => {
     setSimStep('PROCESSING');
-    try {
-      const res = await fetch('/api/telegram/webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: {
-            chat: { id: '111000' },
-            text: commercialInput,
-          },
-        }),
-      });
+    setTimeout(() => {
       setSimStep('READY_PUBLISH');
-    } catch (e) {
-      console.error(e);
-    }
+    }, 500);
   };
 
-  const handleSimulatePublish = async () => {
+  const handleSimulatePublish = () => {
     setSimStep('PROCESSING');
-    try {
-      const res = await fetch('/api/telegram/webhook', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          callback_query: {
-            message: { chat: { id: '111000' } },
-            data: 'publish_product_session-demo',
-          },
-        }),
-      });
+    setTimeout(() => {
       setSimStep('PUBLISHED');
-    } catch (e) {
-      console.error(e);
-    }
+    }, 600);
   };
 
   return (
@@ -99,9 +61,9 @@ export default function SellerTelegramGuidePage() {
             </p>
 
             <div className="bg-neutral-900 text-white p-4 rounded-2xl text-center">
-              <div className="text-xs text-neutral-400 font-mono">YOUR 6-DIGIT PAIRING CODE:</div>
-              <div className="text-3xl font-mono font-bold text-amber-400 tracking-widest my-1">999888</div>
-              <div className="text-[10px] text-neutral-400">Store: Silk & Thread Boutique</div>
+              <div className="text-xs text-neutral-400 font-mono">SELLER BOT ONBOARDING:</div>
+              <div className="text-sm font-bold text-amber-400 my-1">Connect Your Account</div>
+              <div className="text-[10px] text-neutral-400">Search @TrendMallSellerBot on Telegram &amp; send /start</div>
             </div>
 
             <div className="pt-2 text-xs space-y-2 text-neutral-600 border-t border-neutral-100">
@@ -110,7 +72,7 @@ export default function SellerTelegramGuidePage() {
                 <li>• <code>➕ Add Product</code>: Photo → AI BG removal → Publish</li>
                 <li>• <code>📦 My Products</code>: Active inventory overview</li>
                 <li>• <code>🛍 Orders</code>: Real-time customer order cards</li>
-                <li>• <code>📊 Sales Analytics</code>: Daily & monthly revenue</li>
+                <li>• <code>📊 Sales Analytics</code>: Daily &amp; monthly revenue</li>
               </ul>
             </div>
           </div>
@@ -124,7 +86,7 @@ export default function SellerTelegramGuidePage() {
                 <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
                 <h3 className="text-sm font-bold text-white font-mono">Telegram AI Workflow Simulator</h3>
               </div>
-              <span className="text-[10px] bg-neutral-800 text-neutral-300 px-2 py-0.5 rounded font-mono">LIVE SANDBOX</span>
+              <span className="text-[10px] bg-neutral-800 text-neutral-300 px-2 py-0.5 rounded font-mono">INTERACTIVE PREVIEW</span>
             </div>
 
             <p className="text-xs text-neutral-400">
