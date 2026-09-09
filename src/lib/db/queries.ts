@@ -376,6 +376,17 @@ export async function getStoreById(id: string): Promise<StoreRow | null> {
   return (data as StoreRow) || null;
 }
 
+export async function getStoreByOwnerId(ownerId: string): Promise<StoreRow | null> {
+  const { data, error } = await supabase
+    .from('stores')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .maybeSingle();
+
+  if (error && error.code !== 'PGRST116') throw error;
+  return (data as StoreRow) || null;
+}
+
 export async function getAllApprovedStores(): Promise<StoreRow[]> {
   const { data, error } = await supabase
     .from('stores')

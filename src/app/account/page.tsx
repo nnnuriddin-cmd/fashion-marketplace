@@ -1,78 +1,33 @@
-import React from 'react';
+﻿import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { supabase } from '@/lib/supabase';
+import { getCurrentUser } from '@/lib/auth';
 import { getUserById, getCustomerOrders, UserRow, CustomerOrderDetails } from '@/lib/db';
-import { Package, Store, AlertCircle, User, LogIn, Sparkles } from 'lucide-react';
+import { Package, Store, AlertCircle, Sparkles, ShieldCheck } from 'lucide-react';
+import { LoginForm } from '@/components/auth/LoginForm';
+import { SignOutButton } from '@/components/auth/SignOutButton';
 
 export const revalidate = 0;
 
 export default async function CustomerAccountPage() {
-  // 1. Retrieve the authenticated user strictly from Supabase Auth
-  // We do NOT use searchParams, hardcoded IDs, or demo fallbacks ('usr-customer-1').
-  let customerId: string | null = null;
-  let authError: string | null = null;
+  // 1. Retrieve the authenticated user strictly from Supabase Auth SSR session
+  const authUser = await getCurrentUser();
 
-  try {
-    const { data: authData, error: sessionErr } = await supabase.auth.getUser();
-    if (sessionErr) {
-      // If error is not a simple 'missing token/session', record it
-      if (sessionErr.message && !sessionErr.message.includes('missing') && !sessionErr.message.includes('Auth session missing')) {
-        authError = sessionErr.message;
-      }
-    } else if (authData?.user?.id) {
-      customerId = authData.user.id;
-    }
-  } catch (err) {
-    console.error('Error verifying Supabase Auth user session:', err);
-    authError = err instanceof Error ? err.message : String(err);
-  }
-
-  // 2. If the user is not authenticated, render an explicit "Sign In Required" state
-  // rather than substituting an arbitrary or hardcoded customerId.
-  if (!customerId) {
+  // 2. If unauthenticated, render the sign-in form
+  if (!authUser) {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-16 text-center space-y-6">
-        <div className="bg-amber-50 text-amber-900 border border-amber-200 p-5 rounded-3xl max-w-md mx-auto space-y-3">
-          <div className="w-14 h-14 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto">
-            <User className="w-7 h-7" />
-          </div>
-          <h1 className="text-2xl font-serif font-bold text-neutral-900">Sign In to Your Account</h1>
-          <p className="text-xs text-neutral-600 leading-relaxed">
-            Authentication is required to view your profile and tracking details.
-            In order to securely protect your order history, personal accounts are accessible only via verified Supabase Auth.
-          </p>
-
-          {authError && (
-            <div className="bg-rose-50 text-rose-700 text-[11px] p-2 rounded-lg border border-rose-200">
-              Auth notice: {authError}
-            </div>
-          )}
-
-          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
-            <Link
-              href="/"
-              className="w-full sm:w-auto bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-semibold px-6 py-2.5 rounded-xl transition-colors inline-flex items-center justify-center gap-1.5"
-            >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>Sign In / Sign Up</span>
-            </Link>
-            <Link
-              href="/search"
-              className="w-full sm:w-auto bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-xs font-semibold px-6 py-2.5 rounded-xl transition-colors"
-            >
-              Browse Catalog
-            </Link>
-          </div>
-        </div>
+      <div className="max-w-3xl mx-auto px-4 py-12 text-center space-y-6">
+        <LoginForm />
 
         <div className="inline-flex items-center gap-2 text-xs text-neutral-400">
           <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-          <span>Multi-Vendor Digital Fashion Mall</span>
+          <span>TrendMall Multi-Vendor Digital Fashion Marketplace</span>
         </div>
       </div>
     );
   }
+
+  const customerId = authUser.id;
 
   // 3. For authenticated users, query profile and orders strictly by auth.uid()
   let user: UserRow | null = null;
@@ -114,23 +69,41 @@ export default async function CustomerAccountPage() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">
       {/* User Header Profile Card */}
-      <div className="bg-white p-6 sm:p-8 rounded-3xl border border-neutral-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-6">
+      <div className="bg-white p-6 sm:p-8 rounded-3xl border border-neutral-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
           <div className="w-16 h-16 rounded-full bg-neutral-900 text-white font-bold flex items-center justify-center text-2xl">
-            {user?.full_name?.charAt(0) || 'C'}
+            {user?.full_name?.charAt(0) || authUser.email?.charAt(0).toUpperCase() || 'U'}
           </div>
-          <div>
-            <h1 className="text-2xl font-serif font-bold text-neutral-900">
-              {user?.full_name || 'Customer Profile'}
-            </h1>
-            <p className="text-xs text-neutral-500">
-              {user?.email || 'No email registered'} {user?.phone ? `• ${user.phone}` : ''}
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-serif font-bold text-neutral-900">
+                {user?.full_name || 'Authenticated User'}
+              </h1>
+              {user?.role && (
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
+                  {user.role}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-neutral-500 flex flex-wrap items-center gap-2">
+              <span className="font-medium text-neutral-700">{authUser.email}</span>
+              {user?.phone && <span>• {user.phone}</span>}
+              <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 flex items-center gap-1">
+                <ShieldCheck className="w-3 h-3" />
+                <span>Verified Auth Session</span>
+              </span>
+            </p>
+            <p className="text-[10px] font-mono text-neutral-400">
+              User UUID: {authUser.id}
             </p>
           </div>
         </div>
 
-        <div className="bg-neutral-50 px-4 py-2 rounded-xl text-xs text-neutral-600 border border-neutral-200">
-          Total Orders Placed: <strong>{orders.length}</strong>
+        <div className="flex items-center gap-3 self-end sm:self-center">
+          <div className="bg-neutral-50 px-4 py-2 rounded-xl text-xs text-neutral-600 border border-neutral-200">
+            Orders: <strong>{orders.length}</strong>
+          </div>
+          <SignOutButton />
         </div>
       </div>
 

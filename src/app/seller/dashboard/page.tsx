@@ -1,8 +1,10 @@
 import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { requireRole } from '@/lib/auth';
 import {
   getStoreById,
+  getStoreByOwnerId,
   getAllApprovedStores,
   getSellerDashboardMetrics,
   getSellerOrders,
@@ -19,38 +21,50 @@ interface SellerDashboardPageProps {
 }
 
 export default async function SellerDashboardPage({ searchParams }: SellerDashboardPageProps) {
-  // Determine active store:
-  // 1. Check explicit searchParams.storeId
-  // 2. Fall back to the configured demo store 'str-1'
-  // 3. If 'str-1' does not exist in the database, safely fall back to the first available approved store
-  const requestedStoreId = searchParams?.storeId || 'str-1';
+  // 1. Enforce strict server-side authorization
+  // - unauthenticated user -> redirects to /account
+  // - authenticated CUSTOMER -> redirects to /
+  // - authenticated SELLER -> allowed
+  // - authenticated ADMIN -> allowed
+  const profile = await requireRole(['SELLER', 'ADMIN'], '/account', '/');
 
+  // 2. Resolve store exclusively based on verified identity:
+  // - For a SELLER: resolved strictly from stores.owner_id = profile.id.
+  //   A seller can NEVER select or access another merchant's store via ?storeId=...
+  // - For an ADMIN: allowed to inspect specific store via searchParams or fallback to their own store.
   let store: StoreRow | null = null;
   try {
-    store = await getStoreById(requestedStoreId);
-
-    // If default 'str-1' not found, fall back to the first existing approved store
-    if (!store) {
-      const approvedStores = await getAllApprovedStores();
-      if (approvedStores.length > 0) {
-        store = approvedStores[0];
+    if (profile.role === 'SELLER') {
+      store = await getStoreByOwnerId(profile.id);
+    } else if (profile.role === 'ADMIN') {
+      if (searchParams?.storeId) {
+        store = await getStoreById(searchParams.storeId);
+      }
+      if (!store) {
+        store = await getStoreByOwnerId(profile.id);
+      }
+      if (!store) {
+        const approvedStores = await getAllApprovedStores();
+        if (approvedStores.length > 0) {
+          store = approvedStores[0];
+        }
       }
     }
   } catch (error) {
-    console.error(`Failed to retrieve store [${requestedStoreId}]:`, error);
+    console.error(`Failed to retrieve store for user [${profile.id}]:`, error);
     throw new Error(`Failed to load store information: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  // Handle case where no store exists at all in the database
+  // 3. Safe empty state if no store belongs to this account
   if (!store) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-16 text-center space-y-6">
         <div className="bg-amber-100 text-amber-800 p-4 rounded-full w-16 h-16 mx-auto flex items-center justify-center">
           <Store className="w-8 h-8" />
         </div>
-        <h1 className="text-2xl font-serif font-bold text-neutral-900">No Seller Store Found</h1>
-        <p className="text-sm text-neutral-600">
-          No merchant boutique is registered or approved yet. Please register a store to access the dashboard.
+        <h1 className="text-2xl font-serif font-bold text-neutral-900">No Store Associated with Account</h1>
+        <p className="text-sm text-neutral-600 max-w-md mx-auto">
+          You are authenticated as <span className="font-semibold text-neutral-800">{profile.email}</span>, but no store was found for your account. Please register a store to activate your merchant boutique.
         </p>
         <Link
           href="/seller/register"
@@ -58,6 +72,26 @@ export default async function SellerDashboardPage({ searchParams }: SellerDashbo
         >
           Register Store →
         </Link>
+      </div>
+    );
+  }
+
+  // 4. Safe state if store is not approved yet (e.g. PENDING, SUSPENDED, REJECTED)
+  if (store.status !== 'APPROVED' && profile.role !== 'ADMIN') {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-16 text-center space-y-6">
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 p-8 rounded-3xl max-w-md mx-auto space-y-3">
+          <div className="w-12 h-12 bg-amber-100 text-amber-800 rounded-full flex items-center justify-center mx-auto">
+            <Store className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-serif font-bold text-neutral-900">{store.name}</h2>
+          <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-amber-200 text-amber-900">
+            Status: {store.status}
+          </span>
+          <p className="text-xs text-neutral-600 leading-relaxed">
+            Your boutique registration is currently {store.status.toLowerCase()}. You will gain full access to merchant operations and order tracking once an administrator approves your store.
+          </p>
+        </div>
       </div>
     );
   }

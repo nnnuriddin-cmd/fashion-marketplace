@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { supabase } from '@/lib/supabase';
+import { requireRole } from '@/lib/auth';
 import {
   getAdminPlatformMetrics,
   getAdminStoresList,
@@ -14,18 +14,14 @@ import { ShieldCheck, Store, ShoppingBag, Package, DollarSign, Users, Sparkles, 
 export const revalidate = 0;
 
 export default async function AdminDashboardPage() {
-  // 1. In the current architecture, full Admin RBAC / auth session protection is not yet finalized.
-  // There is currently NO Admin role verification middleware or backend check.
-  // Checking supabase.auth.getUser() only checks for the presence of a Supabase Auth session, NOT admin privileges.
-  let authNotice: string | null = null;
-  try {
-    const { data: authData, error: authErr } = await supabase.auth.getUser();
-    if (authErr && !authErr.message.includes('missing') && !authErr.message.includes('Auth session missing')) {
-      authNotice = authErr.message;
-    }
-  } catch (err) {
-    authNotice = err instanceof Error ? err.message : String(err);
-  }
+  // 1. Enforce strict server-side ADMIN authorization
+  // Rules:
+  // - unauthenticated user -> redirects to /account
+  // - authenticated CUSTOMER -> redirects to /
+  // - authenticated SELLER -> redirects to /
+  // - authenticated ADMIN -> allowed
+  // NEVER trusts role from query params, request body, client state, or localStorage.
+  const profile = await requireRole(['ADMIN'], '/account', '/');
 
   // 2. Fetch admin metrics and stores strictly via existing DB layer functions.
   // We do NOT substitute fake zeros if data loading fails.
@@ -97,13 +93,9 @@ export default async function AdminDashboardPage() {
         <p className="text-xs text-neutral-300 max-w-xl leading-relaxed">
           Manage seller approvals, product moderation, commission parameters, parent/child orders, and marketplace analytics.
         </p>
-
-        {authNotice && (
-          <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs px-3 py-2 rounded-xl flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>Auth Notice: {authNotice}</span>
-          </div>
-        )}
+        <div className="text-xs text-emerald-300 flex items-center gap-2 pt-1">
+          <span>Authenticated Administrator: <strong>{profile.email}</strong></span>
+        </div>
       </div>
 
       {/* Metrics Row */}

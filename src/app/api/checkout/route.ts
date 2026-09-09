@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { getCurrentUser } from '@/lib/auth';
 import { createOrderTransaction, CartItemCheckoutInput } from '@/lib/db';
 import { notifySellerNewOrder } from '@/lib/telegram/notifier';
 
@@ -26,9 +26,9 @@ export async function POST(req: NextRequest) {
     // Guest orders are permitted with customer_id = null.
     let customerId: string | null = null;
     try {
-      const { data: authData } = await supabase.auth.getUser();
-      if (authData?.user?.id) {
-        customerId = authData.user.id;
+      const authUser = await getCurrentUser();
+      if (authUser?.id) {
+        customerId = authUser.id;
       }
     } catch {
       // Supabase Auth session absent or error; proceed as guest order
