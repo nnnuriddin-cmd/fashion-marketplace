@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useCart } from '@/lib/cart-context';
+import { createClient } from '@/lib/supabase/client';
 import { ShieldCheck, Truck, CreditCard, CheckCircle, Store, Send } from 'lucide-react';
 
 export default function CheckoutPage() {
@@ -10,14 +11,45 @@ export default function CheckoutPage() {
   const grouped = getGroupedItemsByStore();
   const grandTotal = getTotalAmount();
 
-  const [customerName, setCustomerName] = useState('Anora Karimova');
-  const [customerPhone, setCustomerPhone] = useState('+998901234567');
-  const [deliveryAddress, setDeliveryAddress] = useState('Tashkent, Yakkasaray District, Shota Rustaveli 45');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryMethod, setDeliveryMethod] = useState('STANDARD');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
-  const [orderNotes, setOrderNotes] = useState('Please call before arrival.');
+  const [orderNotes, setOrderNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [completedOrder, setCompletedOrder] = useState<any>(null);
+
+  useEffect(() => {
+    async function loadCustomerProfile() {
+      try {
+        const supabase = createClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (user) {
+          const { data: profile } = await supabase
+            .from('users')
+            .select('full_name, phone')
+            .eq('id', user.id)
+            .maybeSingle();
+
+          if (profile) {
+            if (profile.full_name) setCustomerName(profile.full_name);
+            if (profile.phone) setCustomerPhone(profile.phone);
+          } else if (user.user_metadata) {
+            if (user.user_metadata.full_name) setCustomerName(user.user_metadata.full_name);
+            if (user.user_metadata.phone) setCustomerPhone(user.user_metadata.phone);
+          }
+        }
+      } catch {
+        // Unauthenticated or network error; keep empty for guest checkout
+      }
+    }
+
+    loadCustomerProfile();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,6 +168,7 @@ export default function CheckoutPage() {
                   required
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="e.g. Jasur Aliyev"
                   className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-neutral-900"
                 />
               </div>
@@ -147,6 +180,7 @@ export default function CheckoutPage() {
                   required
                   value={customerPhone}
                   onChange={(e) => setCustomerPhone(e.target.value)}
+                  placeholder="e.g. +998 90 123 45 67"
                   className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-neutral-900"
                 />
               </div>
@@ -159,6 +193,7 @@ export default function CheckoutPage() {
                 required
                 value={deliveryAddress}
                 onChange={(e) => setDeliveryAddress(e.target.value)}
+                placeholder="e.g. Tashkent, Mirabad District, Afrosiyob 12, Apt 45"
                 className="w-full bg-neutral-50 border border-neutral-200 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-neutral-900"
               />
             </div>
