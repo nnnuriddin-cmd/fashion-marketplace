@@ -1,8 +1,9 @@
-﻿'use client';
+'use client';
 
 import React, { useState, useTransition } from 'react';
+import Link from 'next/link';
 import { signInAction } from '@/app/actions/auth';
-import { LogIn, Lock, Mail, AlertCircle, KeyRound } from 'lucide-react';
+import { LogIn, Lock, Mail, AlertCircle, KeyRound, ArrowRight } from 'lucide-react';
 
 export function LoginForm() {
   const [email, setEmail] = useState('');
@@ -99,6 +100,17 @@ export function LoginForm() {
           )}
         </button>
       </form>
+
+      <div className="text-center text-xs text-neutral-500">
+        Don&apos;t have an account?{' '}
+        <Link
+          href="/register"
+          className="font-semibold text-neutral-900 hover:underline inline-flex items-center gap-0.5"
+        >
+          <span>Create account</span>
+          <ArrowRight className="w-3 h-3" />
+        </Link>
+      </div>
 
       {/* Quick Test Accounts */}
       <div className="pt-2 border-t border-neutral-100 space-y-2">
