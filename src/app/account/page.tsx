@@ -1,11 +1,12 @@
-﻿import React from 'react';
+import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { getCurrentUser } from '@/lib/auth';
-import { getUserById, getCustomerOrders, UserRow, CustomerOrderDetails } from '@/lib/db';
+import { getUserById, getCustomerOrders, getStoreByOwnerId, UserRow, CustomerOrderDetails, StoreRow } from '@/lib/db';
 import { Package, Store, AlertCircle, Sparkles, ShieldCheck } from 'lucide-react';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { SignOutButton } from '@/components/auth/SignOutButton';
+import { TelegramConnectCard } from '@/components/account/TelegramConnectCard';
 
 export const revalidate = 0;
 
@@ -44,6 +45,16 @@ export default async function CustomerAccountPage() {
   } catch (error) {
     console.error(`Failed to load customer account [${customerId}] from Supabase:`, error);
     loadError = error instanceof Error ? error.message : String(error);
+  }
+
+  // If user is a seller, load their store details for Telegram connection card
+  let store: StoreRow | null = null;
+  if (user?.role === 'SELLER') {
+    try {
+      store = await getStoreByOwnerId(customerId);
+    } catch {
+      // Store lookup failed or absent
+    }
   }
 
   if (loadError) {
@@ -106,6 +117,15 @@ export default async function CustomerAccountPage() {
           <SignOutButton />
         </div>
       </div>
+
+      {/* Seller Telegram Bot Connection Card */}
+      {user?.role === 'SELLER' && (
+        <TelegramConnectCard
+          isLinked={!!user?.telegram_id}
+          storeName={store?.name}
+          telegramUsername={store?.telegram_username}
+        />
+      )}
 
       {/* Orders History List */}
       <div className="space-y-6">

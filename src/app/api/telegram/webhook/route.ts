@@ -41,6 +41,140 @@ export async function POST(request: NextRequest) {
     const chatId = String(message.chat.id);
     const text = message.text?.trim() || '';
 
+    // Privileged server client to authenticate Telegram sellers and manage sessions
+    const supabase = getServerSupabase();
+
+    // 2. Handle One-Time Account Linking (/link CODE or /start CODE)
+    let linkCode: string | null = null;
+    if (text.startsWith('/link')) {
+      linkCode = text.replace(/^\/link\s*/i, '').trim();
+    } else if (text.startsWith('/start') && text.length > 6) {
+      linkCode = text.replace(/^\/start\s*/i, '').trim();
+    }
+
+    if (linkCode) {
+      const normalizedCode = linkCode.toUpperCase();
+
+      // Basic input format validation: 32 hexadecimal characters (128 bits entropy)
+      if (!/^[A-F0-9]{32}$/i.test(normalizedCode)) {
+        await sendTelegramMessage(
+          chatId,
+          '⚠️ <b>Invalid Linking Code / Noto\'g\'ri kod</b>\n\n' +
+          'Please provide a valid 32-character linking code from your TrendMall seller account.'
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      // Compute SHA-256 hash of submitted code
+      const submittedHash = crypto.createHash('sha256').update(normalizedCode).digest('hex');
+
+      // Search for candidate user where telegram_code matches the hash prefix
+      const { data: matchedUser, error: searchErr } = await supabase
+        .from('users')
+        .select('id, role, telegram_id, telegram_code')
+        .like('telegram_code', `${submittedHash}:%`)
+        .maybeSingle();
+
+      if (searchErr || !matchedUser || !matchedUser.telegram_code) {
+        await sendTelegramMessage(
+          chatId,
+          '❌ <b>Invalid or Expired Code / Kod yaroqsiz yoki muddati o\'tgan</b>\n\n' +
+          'No active linking request found for this code. Please generate a fresh code in your TrendMall account.'
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      // Parse and validate expiration epoch (10 minutes)
+      const parts = matchedUser.telegram_code.split(':');
+      const expiresAt = parseInt(parts[1], 10);
+      if (!expiresAt || Date.now() > expiresAt) {
+        // Expired - clear code to prevent lingering entries
+        await supabase.from('users').update({ telegram_code: null }).eq('id', matchedUser.id);
+        await sendTelegramMessage(
+          chatId,
+          '⏳ <b>Code Expired / Kod muddati o\'tdi</b>\n\n' +
+          'This linking code has expired (codes are valid for 10 minutes). Please generate a fresh code in your TrendMall account.'
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      // Enforce SELLER role validation strictly
+      if (matchedUser.role !== 'SELLER') {
+        await supabase.from('users').update({ telegram_code: null }).eq('id', matchedUser.id);
+        await sendTelegramMessage(
+          chatId,
+          '⛔ <b>Access Denied / Ruxsat berilmadi</b>\n\n' +
+          'Only registered sellers can connect a Telegram account to TrendMall.'
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      // Verify seller store ownership & status
+      const { data: targetStore, error: storeCheckErr } = await supabase
+        .from('stores')
+        .select('id, name, status')
+        .eq('owner_id', matchedUser.id)
+        .maybeSingle();
+
+      if (storeCheckErr || !targetStore) {
+        await supabase.from('users').update({ telegram_code: null }).eq('id', matchedUser.id);
+        await sendTelegramMessage(
+          chatId,
+          '⚠️ <b>No Store Found / Do\'kon topilmadi</b>\n\n' +
+          'No merchant boutique is associated with this account. Please register your store first.'
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      // Duplicate Telegram ID protection: check if this Telegram chat ID is already linked to ANOTHER user
+      const { data: existingUserWithChatId } = await supabase
+        .from('users')
+        .select('id')
+        .eq('telegram_id', chatId)
+        .maybeSingle();
+
+      if (existingUserWithChatId && existingUserWithChatId.id !== matchedUser.id) {
+        await sendTelegramMessage(
+          chatId,
+          '⛔ <b>Account Conflict / Boshqa hisobga ulangan</b>\n\n' +
+          'This Telegram account is already linked to another TrendMall seller account. Please unlink it from that account first.'
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      // Atomically link Telegram chat ID and consume the single-use token (optimistic lock on telegram_code)
+      const { data: updatedRows, error: linkErr } = await supabase
+        .from('users')
+        .update({
+          telegram_id: chatId,
+          telegram_code: null, // Single-use consumption
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', matchedUser.id)
+        .eq('telegram_code', matchedUser.telegram_code)
+        .select('id');
+
+      if (linkErr || !updatedRows || updatedRows.length === 0) {
+        await sendTelegramMessage(
+          chatId,
+          '⚠️ <b>Linking Failed / Ulanish amalga oshmadi</b>\n\n' +
+          'This code may have already been consumed or expired. Please generate a new code in your TrendMall account.'
+        );
+        return NextResponse.json({ ok: true });
+      }
+
+      // Linking successful! Send localized confirmation with menu
+      await sendTelegramMessage(
+        chatId,
+        `✅ <b>Telegram Successfully Linked! / Telegram muvaffaqiyatli ulandi!</b>\n\n` +
+        `Your Telegram account is now connected to <b>${targetStore.name}</b>.\n\n` +
+        `You will receive instant alerts when customers place orders, and you can upload photos directly to publish products.`,
+        menu
+      );
+      return NextResponse.json({ ok: true });
+    }
+
+    // 3. Welcome / Language Selection for /start without parameters
     if (text === '/start') {
       await sendTelegramMessage(chatId, '🌐 <b>Выберите язык / Tilni tanlang / Choose a language</b>', {
         inline_keyboard: [[
@@ -52,10 +186,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Privileged server client to authenticate Telegram sellers and manage sessions
-    const supabase = getServerSupabase();
-
-    // 1. Authenticate user by telegram_id
+    // 4. Authenticate user by verified telegram_id
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id, role')
@@ -67,12 +198,17 @@ export async function POST(request: NextRequest) {
     if (!user) {
       await sendTelegramMessage(
         chatId,
-        '⛔ <b>Access Denied / Ruxsat berilmadi</b>\n\nYour Telegram account is not registered with any TrendMall seller account. Please register as a seller on the platform first.'
+        '⛔ <b>Access Denied / Ruxsat berilmadi</b>\n\n' +
+        'Your Telegram account is not registered with any TrendMall seller account.\n\n' +
+        'To link your seller account:\n' +
+        '1. Log in to your TrendMall account at https://modora.uz/account\n' +
+        '2. Click <b>Connect Telegram</b> to get a one-time linking code\n' +
+        '3. Send <code>/link CODE</code> here in this chat.'
       );
       return NextResponse.json({ ok: true });
     }
 
-    // 2. Authorize seller store (strictly by owner_id, with zero fallback to other stores)
+    // 5. Authorize seller store (strictly by owner_id, with zero fallback to other stores)
     const { data: store, error: storeError } = await supabase
       .from('stores')
       .select('id, name, status')
@@ -97,7 +233,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // 3. Authorized Seller Actions
+    // 6. Authorized Seller Actions
     if (text === '📦 My Products' || text === '📦 Мои товары' || text === "📦 Mahsulotlarim") {
       const { count, error } = await supabase
         .from('products')

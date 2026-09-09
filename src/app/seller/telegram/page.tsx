@@ -57,13 +57,18 @@ export default function SellerTelegramGuidePage() {
             </h3>
 
             <p className="text-xs text-neutral-500">
-              Open the Telegram app, search for <strong>@TrendMallSellerBot</strong>, tap <code>/start</code> and enter your pair code:
+              To connect your Telegram account, visit your Account Dashboard to generate a secure one-time linking code:
             </p>
 
-            <div className="bg-neutral-900 text-white p-4 rounded-2xl text-center">
+            <div className="bg-neutral-900 text-white p-4 rounded-2xl text-center space-y-2">
               <div className="text-xs text-neutral-400 font-mono">SELLER BOT ONBOARDING:</div>
-              <div className="text-sm font-bold text-amber-400 my-1">Connect Your Account</div>
-              <div className="text-[10px] text-neutral-400">Search @TrendMallSellerBot on Telegram &amp; send /start</div>
+              <Link
+                href="/account"
+                className="inline-block bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs uppercase tracking-wider px-4 py-2 rounded-xl transition-colors"
+              >
+                Go to Account to Link Telegram →
+              </Link>
+              <div className="text-[10px] text-neutral-400">Generate code → send /link CODE to @TrendMallSellerBot</div>
             </div>
 
             <div className="pt-2 text-xs space-y-2 text-neutral-600 border-t border-neutral-100">
