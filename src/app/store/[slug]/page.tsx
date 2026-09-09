@@ -12,31 +12,131 @@ interface StorePageProps {
   params: {
     slug: string;
   };
-  searchParams: {
+  searchParams?: {
     category?: string;
     q?: string;
   };
 }
 
 export default async function StoreFrontpage({ params, searchParams }: StorePageProps) {
-  const { data: store, error: storeError } = await supabase
-    .from('stores')
-    .select('*')
-    .or(`slug.eq.${params.slug},id.eq.${params.slug}`)
-    .maybeSingle();
-  if (storeError) throw storeError;
-
-  if (!store) {
+  if (!params?.slug) {
     notFound();
   }
 
-  let query = supabase.from('products').select('*, categories(id, name, slug)').eq('store_id', store.id).eq('status', 'ACTIVE').order('created_at', { ascending: false });
-  if (searchParams.category) query = query.eq('categories.slug', searchParams.category);
-  if (searchParams.q) query = query.or(`title.ilike.%${searchParams.q}%,description.ilike.%${searchParams.q}%`);
-  const { data: productData, error: productsError } = await query;
-  if (productsError) throw productsError;
-  const products = productData ?? [];
-  const storeCategories = Array.from(new Map(products.filter((product: any) => product.categories).map((product: any) => [product.categories.id, product.categories])).values());
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.slug);
+
+  let rawStore: any = null;
+  try {
+    let storeQuery = supabase.from('stores').select('*');
+    if (isUuid) {
+      storeQuery = storeQuery.eq('id', params.slug);
+    } else {
+      storeQuery = storeQuery.eq('slug', params.slug);
+    }
+
+    const { data, error } = await storeQuery.maybeSingle();
+    if (error) {
+      console.error('Error fetching store from Supabase:', error);
+    }
+    rawStore = data;
+  } catch (err) {
+    console.error('Unexpected error fetching store:', err);
+    rawStore = null;
+  }
+
+  if (!rawStore) {
+    notFound();
+  }
+
+  const store = {
+    ...rawStore,
+    coverImage: rawStore.cover_image || rawStore.coverImage || null,
+    telegramUsername: rawStore.telegram_username || rawStore.telegramUsername || null,
+  };
+
+  const safeSearchParams = searchParams || {};
+  let rawStoreProducts: any[] = [];
+  try {
+    let query = supabase
+      .from('products')
+      .select('*, categories(id, name, slug)')
+      .eq('store_id', store.id)
+      .eq('status', 'ACTIVE')
+      .order('created_at', { ascending: false });
+
+    if (safeSearchParams.q && safeSearchParams.q.trim()) {
+      query = query.or(`title.ilike.%${safeSearchParams.q.trim()}%,description.ilike.%${safeSearchParams.q.trim()}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Error fetching store products from Supabase:', error);
+      rawStoreProducts = [];
+    } else {
+      rawStoreProducts = data || [];
+    }
+  } catch (err) {
+    console.error('Unexpected error fetching store products:', err);
+    rawStoreProducts = [];
+  }
+
+  const storeCategories = Array.from(
+    new Map(
+      rawStoreProducts
+        .filter((product: any) => product.categories)
+        .map((product: any) => [product.categories.id, product.categories])
+    ).values()
+  );
+
+  let filteredProducts = rawStoreProducts;
+  if (safeSearchParams.category) {
+    filteredProducts = filteredProducts.filter(
+      (p: any) => p.categories?.slug === safeSearchParams.category
+    );
+  }
+
+  const fallbackImage = 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=800&q=80';
+
+  const products = filteredProducts.map((p: any) => {
+    const rawImageCandidate = p.original_image || p.image || p.originalImage;
+    const resolvedImage = typeof rawImageCandidate === 'string' && rawImageCandidate.trim() !== ''
+      ? rawImageCandidate.trim()
+      : fallbackImage;
+
+    let safeProcessedImages: string[] = [];
+    if (Array.isArray(p.processed_images)) {
+      safeProcessedImages = p.processed_images.filter((img: any) => typeof img === 'string' && img.trim() !== '');
+    } else if (typeof p.processed_images === 'string') {
+      try {
+        const parsed = JSON.parse(p.processed_images);
+        if (Array.isArray(parsed)) {
+          safeProcessedImages = parsed.filter((img: any) => typeof img === 'string' && img.trim() !== '');
+        }
+      } catch {
+        safeProcessedImages = [];
+      }
+    }
+
+    return {
+      id: String(p.id),
+      storeId: String(p.store_id || store.id),
+      storeName: store.name,
+      storeSlug: store.slug,
+      name: String(p.title || p.name || 'Product'),
+      slug: String(p.slug || ''),
+      price: Number(p.price || 0),
+      discountPrice: p.discount_price !== null && p.discount_price !== undefined ? Number(p.discount_price) : null,
+      currency: String(p.currency || 'UZS'),
+      originalImage: resolvedImage,
+      processedImages: JSON.stringify(safeProcessedImages.length > 0 ? safeProcessedImages : [resolvedImage]),
+      sizes: typeof p.sizes === 'string' ? p.sizes : JSON.stringify(p.sizes || []),
+      colors: typeof p.colors === 'string' ? p.colors : JSON.stringify(p.colors || []),
+      gender: (p.gender as string) || undefined,
+      style: (p.style as string) || undefined,
+      isFeatured: Boolean(p.is_featured),
+      isTrending: Boolean(p.is_trending),
+    };
+  });
 
   return (
     <div className="space-y-10 pb-16">
@@ -128,17 +228,17 @@ export default async function StoreFrontpage({ params, searchParams }: StorePage
             <Link
               href={`/store/${store.slug}`}
               className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-all shrink-0 ${
-                !searchParams.category ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+                !safeSearchParams.category ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
               }`}
             >
-              All Items ({products.length})
+              All Items ({rawStoreProducts.length})
             </Link>
-            {storeCategories.map((cat) => (
+            {storeCategories.map((cat: any) => (
               <Link
                 key={cat.id}
                 href={`/store/${store.slug}?category=${cat.slug}`}
                 className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-all shrink-0 ${
-                  searchParams.category === cat.slug
+                  safeSearchParams.category === cat.slug
                     ? 'bg-amber-800 text-white'
                     : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
                 }`}

@@ -16,35 +16,145 @@ interface ProductPageProps {
 }
 
 export default async function ProductDetailPage({ params }: ProductPageProps) {
-  const { data: rawProduct, error } = await supabase
-    .from('products')
-    .select('*, stores(name, slug, logo, location, rating)')
-    .or(`slug.eq.${params.slug},id.eq.${params.slug}`)
-    .maybeSingle();
-
-  if (error) throw error;
-  const product = rawProduct && {
-    ...rawProduct,
-    storeName: rawProduct.stores?.name,
-    storeSlug: rawProduct.stores?.slug,
-    storeLogo: rawProduct.stores?.logo,
-    storeLocation: rawProduct.stores?.location,
-    storeRating: rawProduct.stores?.rating,
-  };
-
-  if (!product) {
+  if (!params?.slug) {
     notFound();
   }
 
-  const { data: similarData, error: similarError } = await supabase
-    .from('products')
-    .select('*, stores(name, slug)')
-    .eq('category_id', product.category_id)
-    .neq('id', product.id)
-    .eq('status', 'ACTIVE')
-    .limit(4);
-  if (similarError) throw similarError;
-  const similarProducts = (similarData ?? []).map((item: any) => ({ ...item, storeName: item.stores?.name, storeSlug: item.stores?.slug }));
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(params.slug);
+
+  let rawProduct: any = null;
+  try {
+    let query = supabase
+      .from('products')
+      .select('*, stores(id, name, slug, logo, location, rating, phone, telegram_username)');
+
+    if (isUuid) {
+      query = query.eq('id', params.slug);
+    } else {
+      query = query.eq('slug', params.slug);
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (error) {
+      console.error('Error fetching product from Supabase:', error);
+    }
+    rawProduct = data;
+  } catch (err) {
+    console.error('Unexpected error fetching product:', err);
+    rawProduct = null;
+  }
+
+  if (!rawProduct) {
+    notFound();
+  }
+
+  const fallbackImage = 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=800&q=80';
+  const rawImageCandidate = rawProduct.original_image || rawProduct.image || rawProduct.originalImage;
+  const resolvedImage = typeof rawImageCandidate === 'string' && rawImageCandidate.trim() !== ''
+    ? rawImageCandidate.trim()
+    : fallbackImage;
+
+  let safeProcessedImages: string[] = [];
+  if (Array.isArray(rawProduct.processed_images)) {
+    safeProcessedImages = rawProduct.processed_images.filter((img: any) => typeof img === 'string' && img.trim() !== '');
+  } else if (typeof rawProduct.processed_images === 'string') {
+    try {
+      const parsed = JSON.parse(rawProduct.processed_images);
+      if (Array.isArray(parsed)) {
+        safeProcessedImages = parsed.filter((img: any) => typeof img === 'string' && img.trim() !== '');
+      }
+    } catch {
+      safeProcessedImages = [];
+    }
+  }
+  if (safeProcessedImages.length === 0) {
+    safeProcessedImages = [resolvedImage];
+  }
+
+  const product = {
+    ...rawProduct,
+    id: String(rawProduct.id),
+    name: String(rawProduct.title || rawProduct.name || 'Product'),
+    title: String(rawProduct.title || rawProduct.name || 'Product'),
+    price: Number(rawProduct.price || 0),
+    discountPrice: rawProduct.discount_price !== null && rawProduct.discount_price !== undefined
+      ? Number(rawProduct.discount_price)
+      : (rawProduct.discountPrice ? Number(rawProduct.discountPrice) : null),
+    originalImage: resolvedImage,
+    processedImages: JSON.stringify(safeProcessedImages),
+    sizes: typeof rawProduct.sizes === 'string' ? rawProduct.sizes : JSON.stringify(rawProduct.sizes || ['S', 'M', 'L']),
+    colors: typeof rawProduct.colors === 'string' ? rawProduct.colors : JSON.stringify(rawProduct.colors || ['Default']),
+    tags: typeof rawProduct.tags === 'string' ? rawProduct.tags : JSON.stringify(rawProduct.tags || []),
+    storeId: rawProduct.stores?.id || rawProduct.store_id,
+    storeName: rawProduct.stores?.name || 'Boutique Store',
+    storeSlug: rawProduct.stores?.slug || 'store',
+    storeLogo: rawProduct.stores?.logo || null,
+    storeLocation: rawProduct.stores?.location || 'Tashkent',
+    storeRating: rawProduct.stores?.rating || 5.0,
+    storePhone: rawProduct.stores?.phone || null,
+    storeTelegram: rawProduct.stores?.telegram_username || null,
+    stockQuantity: rawProduct.stock_quantity ?? rawProduct.stockQuantity ?? 0,
+    isFeatured: Boolean(rawProduct.is_featured ?? rawProduct.isFeatured),
+    isTrending: Boolean(rawProduct.is_trending ?? rawProduct.isTrending),
+  };
+
+  let similarProducts: any[] = [];
+  try {
+    const { data: similarData, error: similarError } = await supabase
+      .from('products')
+      .select('*, stores(name, slug, logo, location, rating)')
+      .eq('category_id', rawProduct.category_id)
+      .neq('id', rawProduct.id)
+      .eq('status', 'ACTIVE')
+      .limit(4);
+
+    if (similarError) {
+      console.error('Error fetching similar products from Supabase:', similarError);
+    } else if (similarData) {
+      similarProducts = similarData.map((p: any) => {
+        const storeObj = p.stores as { name?: string; slug?: string } | undefined;
+        const pImageCandidate = p.original_image || p.image || p.originalImage;
+        const pResolvedImage = typeof pImageCandidate === 'string' && pImageCandidate.trim() !== ''
+          ? pImageCandidate.trim()
+          : fallbackImage;
+
+        let pSafeProcessed: string[] = [];
+        if (Array.isArray(p.processed_images)) {
+          pSafeProcessed = p.processed_images.filter((img: any) => typeof img === 'string' && img.trim() !== '');
+        } else if (typeof p.processed_images === 'string') {
+          try {
+            const parsed = JSON.parse(p.processed_images);
+            if (Array.isArray(parsed)) {
+              pSafeProcessed = parsed.filter((img: any) => typeof img === 'string' && img.trim() !== '');
+            }
+          } catch {}
+        }
+
+        return {
+          id: String(p.id),
+          storeId: String(p.store_id || ''),
+          storeName: storeObj?.name || 'Boutique',
+          storeSlug: storeObj?.slug || 'boutique',
+          name: String(p.title || p.name || 'Product'),
+          slug: String(p.slug || ''),
+          price: Number(p.price || 0),
+          discountPrice: p.discount_price !== null && p.discount_price !== undefined ? Number(p.discount_price) : null,
+          currency: String(p.currency || 'UZS'),
+          originalImage: pResolvedImage,
+          processedImages: JSON.stringify(pSafeProcessed.length > 0 ? pSafeProcessed : [pResolvedImage]),
+          sizes: typeof p.sizes === 'string' ? p.sizes : JSON.stringify(p.sizes || []),
+          colors: typeof p.colors === 'string' ? p.colors : JSON.stringify(p.colors || []),
+          gender: p.gender || undefined,
+          style: p.style || undefined,
+          isFeatured: Boolean(p.is_featured),
+          isTrending: Boolean(p.is_trending),
+        };
+      });
+    }
+  } catch (similarErr) {
+    console.error('Unexpected error fetching similar products:', similarErr);
+    similarProducts = [];
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-16">
