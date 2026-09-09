@@ -663,16 +663,15 @@ export async function searchProducts(filterOrQuery: string | SearchProductsFilte
 // ============================================================================
 
 /**
- * Creates a parent order, splits it into vendor seller orders, and inserts order items.
+ * Creates a parent order, splits it into vendor seller orders, and inserts order items atomically
+ * via PostgreSQL RPC function `process_checkout_order`.
  *
- * IMPORTANT TRANSACTION & ATOMICITY NOTICE:
- * This implementation uses sequential Supabase REST calls. It is NOT atomic on the database
- * level; if a subsequent step fails (network timeout, constraint failure), previous rows will
- * remain in the database.
- *
- * TODO (PostgreSQL RPC / Stored Procedure):
- * For production-grade atomicity, migrate this function to call a PostgreSQL RPC function
- * (e.g. `supabase.rpc('create_order_checkout', { ... })`) executed inside a single BEGIN...COMMIT transaction.
+ * ATOMIC TRANSACTION GUARANTEE:
+ * - Locks all purchased product rows (ORDER BY id ASC FOR UPDATE) preventing concurrency races.
+ * - Validates product status and stock availability.
+ * - Authoritatively computes totals from database catalog prices (ignores client-submitted prices).
+ * - Decrements inventory inside the same single transaction.
+ * - Rolls back all order creation and inventory mutations if any single item fails.
  */
 export async function createOrderTransaction(
   orderInput: CreateOrderCheckoutInput
@@ -692,211 +691,39 @@ export async function createOrderTransaction(
     throw new Error('Cannot create an order with empty cartItems');
   }
 
+  // Pre-validate that all cart items contain a valid productId
+  for (const item of cartItems) {
+    if (!item.productId) {
+      throw new Error('All cart items must contain a valid productId for checkout validation');
+    }
+  }
+
   // Obtain dedicated server-side client with service_role privileges
-  // for checkout mutations (RLS allows INSERT only via backend authority)
   const serverSupabase = getServerSupabase();
 
-  // 1. Fetch actual products from DB to verify existence, prices, and stock
-  // Client-supplied prices MUST NOT be trusted.
-  const productIds = Array.from(
-    new Set(cartItems.map((item) => item.productId).filter((id): id is string => Boolean(id)))
-  );
+  const generatedOrderNumber = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
 
-  if (productIds.length !== cartItems.length) {
-    throw new Error('All cart items must contain a valid productId for checkout validation');
+  const { data, error } = await serverSupabase.rpc('process_checkout_order', {
+    p_customer_name: customerName,
+    p_customer_phone: customerPhone,
+    p_delivery_address: deliveryAddress,
+    p_delivery_method: deliveryMethod,
+    p_payment_method: paymentMethod,
+    p_order_notes: orderNotes,
+    p_customer_id: customerId,
+    p_cart_items: cartItems,
+    p_order_number: generatedOrderNumber,
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Checkout transaction failed');
   }
 
-  const { data: dbProducts, error: prodErr } = await serverSupabase
-    .from('products')
-    .select('id, title, store_id, price, discount_price, stock_quantity, original_image, status')
-    .in('id', productIds);
-
-  if (prodErr || !dbProducts) {
-    throw new Error(`Failed to verify products in catalog: ${prodErr?.message || 'Unknown database error'}`);
+  if (!data) {
+    throw new Error('Checkout failed: no data returned from RPC');
   }
 
-  const dbProductMap = new Map<string, (typeof dbProducts)[0]>();
-  for (const p of dbProducts) {
-    dbProductMap.set(p.id, p);
-  }
-
-  // Group verified items by store_id and calculate server-side subtotals
-  const storeGroups: Record<
-    string,
-    {
-      items: {
-        productId: string;
-        name: string;
-        image: string | null;
-        verifiedPrice: number;
-        quantity: number;
-        selectedSize: string | null;
-        selectedColor: string | null;
-        lineTotal: number;
-      }[];
-      subtotal: number;
-    }
-  > = {};
-  let totalAmount = 0;
-
-  for (const item of cartItems) {
-    const dbProduct = item.productId ? dbProductMap.get(item.productId) : undefined;
-    if (!dbProduct) {
-      throw new Error(`Product "${item.name}" (ID: ${item.productId}) not found in active catalog.`);
-    }
-
-    if (dbProduct.status !== 'ACTIVE') {
-      throw new Error(`Product "${dbProduct.title}" is currently not available for purchase.`);
-    }
-
-    if (item.quantity <= 0) {
-      throw new Error(`Invalid purchase quantity for "${dbProduct.title}".`);
-    }
-
-    const availableStock = dbProduct.stock_quantity ?? 0;
-    if (availableStock < item.quantity) {
-      throw new Error(
-        `Insufficient stock for "${dbProduct.title}". Available: ${availableStock}, Requested: ${item.quantity}`
-      );
-    }
-
-    // Determine actual effective price from database
-    const actualPrice = dbProduct.discount_price !== null && dbProduct.discount_price !== undefined
-      ? Number(dbProduct.discount_price)
-      : Number(dbProduct.price);
-
-    const targetStoreId = dbProduct.store_id;
-    if (!storeGroups[targetStoreId]) {
-      storeGroups[targetStoreId] = { items: [], subtotal: 0 };
-    }
-
-    const lineTotal = actualPrice * item.quantity;
-    storeGroups[targetStoreId].items.push({
-      productId: dbProduct.id,
-      name: dbProduct.title,
-      image: dbProduct.original_image || item.image || null,
-      verifiedPrice: actualPrice,
-      quantity: item.quantity,
-      selectedSize: item.selectedSize || null,
-      selectedColor: item.selectedColor || null,
-      lineTotal,
-    });
-
-    storeGroups[targetStoreId].subtotal += lineTotal;
-    totalAmount += lineTotal;
-  }
-
-  // 2. Create parent order via serverSupabase client (bypasses RLS INSERT restriction safely on backend)
-  const orderNumber = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
-
-  const { data: parentOrder, error: parentError } = await serverSupabase
-    .from('parent_orders')
-    .insert([
-      {
-        order_number: orderNumber,
-        customer_id: customerId || null,
-        customer_name: customerName,
-        customer_phone: customerPhone,
-        delivery_address: deliveryAddress,
-        delivery_method: deliveryMethod,
-        payment_method: paymentMethod,
-        payment_status: 'PENDING',
-        total_amount: totalAmount,
-        order_notes: orderNotes,
-      },
-    ])
-    .select()
-    .single();
-
-  if (parentError || !parentOrder) {
-    throw new Error(`Failed to create parent_order: ${parentError?.message}`);
-  }
-
-  // 3. Fetch commission rates for participating stores
-  const storeIds = Object.keys(storeGroups);
-  const { data: storesData } = await serverSupabase
-    .from('stores')
-    .select('id, commission_rate')
-    .in('id', storeIds);
-
-  const commissionMap: Record<string, number> = {};
-  if (storesData) {
-    for (const s of storesData) {
-      commissionMap[s.id] = Number(s.commission_rate) || 10.0;
-    }
-  }
-
-  // 4. Create seller orders and line items via serverSupabase
-  const sellerLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-  let letterIdx = 0;
-  const createdSellerOrdersResult: CreateOrderCheckoutResult['sellerOrders'] = [];
-
-  for (const [storeId, group] of Object.entries(storeGroups)) {
-    const subOrderNumber = `${orderNumber}-${sellerLetters[letterIdx % sellerLetters.length]}`;
-    letterIdx++;
-
-    const commRate = commissionMap[storeId] ?? 10.0;
-    const commissionAmount = Math.round(((group.subtotal * commRate) / 100) * 100) / 100;
-    const sellerEarnings = group.subtotal - commissionAmount;
-
-    const { data: sellerOrder, error: sellerError } = await serverSupabase
-      .from('seller_orders')
-      .insert([
-        {
-          sub_order_number: subOrderNumber,
-          parent_order_id: parentOrder.id,
-          store_id: storeId,
-          status: 'NEW',
-          subtotal: group.subtotal,
-          commission_amount: commissionAmount,
-          seller_earnings: sellerEarnings,
-        },
-      ])
-      .select()
-      .single();
-
-    if (sellerError || !sellerOrder) {
-      throw new Error(`Failed to create seller_order for store ${storeId}: ${sellerError?.message}`);
-    }
-
-    // Insert order items for this sub-order using verified product price snapshots
-    const itemsPayload = group.items.map((item) => ({
-      seller_order_id: sellerOrder.id,
-      product_id: item.productId,
-      product_name: item.name,
-      product_image: item.image,
-      selected_size: item.selectedSize,
-      selected_color: item.selectedColor,
-      price: item.verifiedPrice,
-      quantity: item.quantity,
-      subtotal: item.lineTotal,
-    }));
-
-    const { error: itemsError } = await serverSupabase
-      .from('order_items')
-      .insert(itemsPayload);
-
-    if (itemsError) {
-      throw new Error(`Failed to insert order_items for sub-order ${subOrderNumber}: ${itemsError.message}`);
-    }
-
-    createdSellerOrdersResult.push({
-      sellerOrderId: sellerOrder.id,
-      subOrderNumber: sellerOrder.sub_order_number,
-      storeId,
-      subtotal: group.subtotal,
-      commissionAmount,
-      sellerEarnings,
-      itemsCount: group.items.length,
-    });
-  }
-
-  return {
-    parentOrderId: parentOrder.id,
-    orderNumber: parentOrder.order_number,
-    totalAmount,
-    sellerOrders: createdSellerOrdersResult,
-  };
+  return data as CreateOrderCheckoutResult;
 }
 
 // ============================================================================
