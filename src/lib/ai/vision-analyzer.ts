@@ -150,7 +150,7 @@ export function validateVisionAnalysisResult(raw: unknown): VisionAnalysisResult
 }
 
 /**
- * Analyzes a garment image buffer using Gemini Vision (gemini-2.5-flash).
+ * Analyzes a garment image buffer using Gemini Vision (gemini-3.6-flash).
  * Receives actual image bytes, validates output structure, and returns a sanitized result.
  *
  * Security:
@@ -186,7 +186,7 @@ export async function analyzeClothingImage(
   }
 
   const base64Payload = buffer.toString('base64');
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
 
   let response: Response;
   try {
