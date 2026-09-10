@@ -11,6 +11,7 @@ import {
   StoreRow,
 } from '@/lib/db';
 import { Store, Send, ShoppingBag, Package, DollarSign, Sparkles, AlertCircle } from 'lucide-react';
+import { SellerOrderStatusController } from '@/components/seller/SellerOrderStatusController';
 
 export const revalidate = 0;
 
@@ -232,48 +233,112 @@ export default async function SellerDashboardPage({ searchParams }: SellerDashbo
           <span className="text-xs text-neutral-500">Real-time Telegram Alert Sync</span>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-4">
           {sellerOrders.length === 0 ? (
             <div className="text-center py-8 text-xs text-neutral-500">No recent orders yet.</div>
           ) : (
             sellerOrders.map((so) => (
               <div
                 key={so.id}
-                className="bg-neutral-50 p-4 rounded-2xl border border-neutral-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                className="bg-neutral-50 p-4 sm:p-5 rounded-2xl border border-neutral-200/80 space-y-4 shadow-sm"
               >
-                <div className="space-y-1 text-xs">
-                  <div className="font-bold text-neutral-900 font-mono">
-                    Sub-Order #{so.sub_order_number}
-                  </div>
-                  <div className="text-neutral-600">
-                    Customer: <strong>{so.customer_name}</strong> ({so.customer_phone})
-                  </div>
-                  <div className="text-neutral-500 text-[11px]">{so.delivery_address}</div>
-                </div>
-
-                <div className="flex items-center gap-4 text-xs">
-                  <div className="text-right">
-                    <div className="font-bold text-neutral-900">{Number(so.subtotal).toLocaleString()} UZS</div>
-                    <div className="text-[11px] text-amber-800">
-                      Net: {Number(so.seller_earnings).toLocaleString()} UZS
+                {/* Header: Sub-Order #, Customer Info, Status Controller */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-3 border-b border-neutral-200/70">
+                  <div className="space-y-1 text-xs">
+                    <div className="font-bold text-neutral-900 font-mono text-sm">
+                      Sub-Order #{so.sub_order_number}
+                    </div>
+                    <div className="text-neutral-700">
+                      Customer: <strong>{so.customer_name}</strong>{' '}
+                      {so.customer_phone && <span className="text-neutral-500">({so.customer_phone})</span>}
+                    </div>
+                    <div className="text-neutral-500 text-[11px]">
+                      {so.delivery_address || 'Address not specified'}
                     </div>
                   </div>
 
-                  <span
-                    className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-                      so.status === 'CONFIRMED'
-                        ? 'bg-emerald-100 text-emerald-800'
-                        : so.status === 'PREPARING'
-                        ? 'bg-amber-100 text-amber-800'
-                        : so.status === 'OUT_FOR_DELIVERY'
-                        ? 'bg-sky-100 text-sky-800'
-                        : so.status === 'DELIVERED'
-                        ? 'bg-teal-100 text-teal-800'
-                        : 'bg-neutral-200 text-neutral-800'
-                    }`}
-                  >
-                    {so.status}
-                  </span>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                    <div className="text-left sm:text-right">
+                      <div className="font-bold text-neutral-900 text-sm">
+                        {Number(so.subtotal).toLocaleString()} UZS
+                      </div>
+                      <div className="text-[11px] text-amber-800 font-medium">
+                        Net: {Number(so.seller_earnings).toLocaleString()} UZS
+                      </div>
+                    </div>
+
+                    <SellerOrderStatusController
+                      sellerOrderId={so.id}
+                      currentStatus={so.status}
+                    />
+                  </div>
+                </div>
+
+                {/* Items List */}
+                <div className="space-y-2">
+                  <div className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wider">
+                    Order Items ({so.items?.length || 0})
+                  </div>
+                  <div className="divide-y divide-neutral-200/60 bg-white rounded-xl border border-neutral-200/70 px-3.5 py-1">
+                    {so.items && so.items.length > 0 ? (
+                      so.items.map((item) => (
+                        <div
+                          key={item.id}
+                          className="py-2.5 first:pt-2 last:pb-2 flex items-center justify-between text-xs gap-3"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="relative w-10 h-10 bg-neutral-100 rounded-lg border border-neutral-200 overflow-hidden shrink-0">
+                              {item.product_image ? (
+                                <Image
+                                  src={item.product_image}
+                                  alt={item.product_name}
+                                  fill
+                                  className="object-cover"
+                                  unoptimized
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-neutral-400">
+                                  <Package className="w-4 h-4" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-neutral-900 truncate">
+                                {item.product_name}
+                              </p>
+                              <p className="text-[11px] text-neutral-500 flex flex-wrap items-center gap-1.5 pt-0.5">
+                                {item.selected_size && (
+                                  <span className="bg-neutral-100 px-1.5 py-0.5 rounded text-neutral-700">
+                                    Size: {item.selected_size}
+                                  </span>
+                                )}
+                                {item.selected_color && (
+                                  <span className="bg-neutral-100 px-1.5 py-0.5 rounded text-neutral-700">
+                                    Color: {item.selected_color}
+                                  </span>
+                                )}
+                                <span>Qty: <strong>{item.quantity}</strong></span>
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="font-bold text-neutral-900">
+                              {Number(item.price).toLocaleString()} UZS
+                            </div>
+                            {item.quantity > 1 && (
+                              <div className="text-[10px] text-neutral-400">
+                                Total: {Number(item.subtotal).toLocaleString()} UZS
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-xs text-neutral-400 py-2 text-center">
+                        No item details found
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))
