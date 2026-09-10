@@ -25,6 +25,25 @@ export async function sendTelegramMessage(chatId: string, text: string, replyMar
   }
 }
 
+export async function answerTelegramCallbackQuery(callbackQueryId: string, text?: string) {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) return { ok: true, simulated: true };
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text,
+      }),
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('Failed to answer Telegram callback query:', err);
+    return { ok: false, error: String(err) };
+  }
+}
+
 export async function notifySellerNewOrder(sellerOrderId: string) {
   try {
     const sellerOrder = await getSellerOrderForNotification(sellerOrderId);
