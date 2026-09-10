@@ -53,27 +53,32 @@ const VISION_ANALYSIS_SCHEMA = {
       description: 'Primary fashion category',
     },
     brand: {
-      type: ['STRING', 'NULL'],
+      type: 'STRING',
+      nullable: true,
     },
     color: {
       type: 'STRING',
       description: 'Dominant product color or colors',
     },
     material: {
-      type: ['STRING', 'NULL'],
+      type: 'STRING',
+      nullable: true,
     },
     gender: {
       type: 'STRING',
       enum: ['WOMEN', 'MEN', 'UNISEX', 'KIDS'],
     },
     style: {
-      type: ['STRING', 'NULL'],
+      type: 'STRING',
+      nullable: true,
     },
     occasion: {
-      type: ['STRING', 'NULL'],
+      type: 'STRING',
+      nullable: true,
     },
     season: {
-      type: ['STRING', 'NULL'],
+      type: 'STRING',
+      nullable: true,
     },
     tags: {
       type: 'ARRAY',
@@ -82,7 +87,8 @@ const VISION_ANALYSIS_SCHEMA = {
       },
     },
     suggestedPrice: {
-      type: ['INTEGER', 'NULL'],
+      type: 'INTEGER',
+      nullable: true,
     },
   },
   required: [
