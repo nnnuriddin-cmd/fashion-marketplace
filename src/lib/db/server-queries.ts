@@ -1,5 +1,6 @@
 import 'server-only';
 import { createClient } from '@/lib/supabase/server';
+import { getServerSupabase } from '@/lib/supabase-server';
 import {
   UserRow,
   StoreRow,
@@ -7,6 +8,7 @@ import {
   OrderItemRow,
   ParentOrderRow,
   OrderStatus,
+  AdminPlatformMetrics,
 } from './queries';
 
 // ============================================================================
@@ -35,6 +37,66 @@ export interface CustomerOrderDetails extends ParentOrderRow {
     store_logo?: string | null;
     items: OrderItemRow[];
   })[];
+}
+
+export interface AdminOrderItem {
+  id: string;
+  productId: string | null;
+  productName: string;
+  productImage: string | null;
+  selectedSize: string | null;
+  selectedColor: string | null;
+  price: number;
+  quantity: number;
+  subtotal: number;
+}
+
+export interface AdminSellerSubOrder {
+  id: string;
+  subOrderNumber: string;
+  storeId: string | null;
+  storeName: string;
+  storeSlug: string | null;
+  status: OrderStatus;
+  subtotal: number;
+  commissionAmount: number;
+  sellerEarnings: number;
+  createdAt: string;
+  itemsCount: number;
+  items: AdminOrderItem[];
+}
+
+export interface AdminOrderDetails {
+  id: string;
+  orderNumber: string;
+  createdAt: string;
+  customerId: string | null;
+  customerName: string;
+  customerPhone: string;
+  customerEmail: string | null;
+  deliveryAddress: string;
+  deliveryMethod: string | null;
+  paymentMethod: string | null;
+  paymentStatus: string | null;
+  totalAmount: number;
+  orderNotes: string | null;
+  totalItemsCount: number;
+  sellerOrdersCount: number;
+  sellerOrders: AdminSellerSubOrder[];
+}
+
+export interface AdminOrdersResult {
+  orders: AdminOrderDetails[];
+  totalCount: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+export interface AdminOrdersQueryOptions {
+  limit?: number;
+  offset?: number;
+  status?: string;
 }
 
 // ============================================================================
@@ -266,3 +328,243 @@ export async function updateSellerOrderStatus(
   if (error) throw error;
   return (data as SellerOrderRow) || null;
 }
+
+// ============================================================================
+// Server-Only Authenticated Admin Queries
+// ============================================================================
+
+/**
+ * Internal security guard enforcing authenticated ADMIN role for administrative queries.
+ * Derived strictly from verified SSR session and authoritative public.users.role.
+ * Never trusts client input, query parameters, or client-supplied IDs.
+ */
+async function assertAdminRole(): Promise<void> {
+  const supabase = createClient();
+  const {
+    data: { user },
+    error: authErr,
+  } = await supabase.auth.getUser();
+
+  if (authErr || !user) {
+    throw new Error('Unauthorized: Authentication required');
+  }
+
+  const serverSupabase = getServerSupabase();
+  const { data: profile, error: profileErr } = await serverSupabase
+    .from('users')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (profileErr || !profile || profile.role !== 'ADMIN') {
+    throw new Error('Forbidden: ADMIN role required');
+  }
+}
+
+/**
+ * Retrieves global marketplace parent orders with nested seller sub-orders and items.
+ * Strictly gated to authenticated administrators on the server.
+ * Uses service-role client on the server to read across vendor and customer boundaries.
+ * 
+ * Invariants:
+ * - Read-only: does not expose or perform any mutations.
+ * - Paged: bounded by safe limit (max 100) and offset range.
+ */
+export async function getAdminRecentOrders(
+  options?: AdminOrdersQueryOptions
+): Promise<AdminOrdersResult> {
+  await assertAdminRole();
+
+  const safeLimit = Math.min(Math.max(1, options?.limit ?? 20), 100);
+  const safeOffset = Math.max(0, options?.offset ?? 0);
+  const statusFilter = options?.status?.toUpperCase()?.trim();
+
+  const serverSupabase = getServerSupabase();
+
+  const isSellerOrderStatus = statusFilter && [
+    'NEW',
+    'CONFIRMED',
+    'PREPARING',
+    'OUT_FOR_DELIVERY',
+    'DELIVERED',
+    'CANCELLED',
+  ].includes(statusFilter);
+
+  const isPaymentStatus = statusFilter && ['PAID', 'PENDING', 'REFUNDED'].includes(statusFilter);
+
+  // When filtering by seller order status, use !inner to enforce parent row filtering in PostgREST
+  const sellerOrdersRelation = isSellerOrderStatus ? 'seller_orders!inner (' : 'seller_orders (';
+
+  const selectQuery = `
+    id,
+    order_number,
+    customer_id,
+    customer_name,
+    customer_phone,
+    delivery_address,
+    delivery_method,
+    payment_method,
+    payment_status,
+    total_amount,
+    order_notes,
+    created_at,
+    users:customer_id (
+      id,
+      email,
+      full_name,
+      phone
+    ),
+    ${sellerOrdersRelation}
+      id,
+      sub_order_number,
+      status,
+      subtotal,
+      commission_amount,
+      seller_earnings,
+      store_id,
+      created_at,
+      stores:store_id (
+        id,
+        name,
+        slug
+      ),
+      order_items (
+        id,
+        product_id,
+        product_name,
+        product_image,
+        selected_size,
+        selected_color,
+        price,
+        quantity,
+        subtotal
+      )
+    )
+  `;
+
+  let query = serverSupabase
+    .from('parent_orders')
+    .select(selectQuery, { count: 'exact' })
+    .order('created_at', { ascending: false });
+
+  if (isSellerOrderStatus) {
+    query = query.eq('seller_orders.status', statusFilter);
+  } else if (isPaymentStatus) {
+    query = query.eq('payment_status', statusFilter);
+  }
+
+  const { data, count, error } = await query.range(safeOffset, safeOffset + safeLimit - 1);
+
+  if (error) {
+    console.error('Failed to retrieve admin orders:', error);
+    throw new Error(`Failed to load admin orders: ${error.message}`);
+  }
+
+  const totalCount = count ?? 0;
+  const page = Math.floor(safeOffset / safeLimit) + 1;
+  const totalPages = Math.ceil(totalCount / safeLimit);
+
+  const orders: AdminOrderDetails[] = (data || []).map((row: any) => {
+    const customer = row.users || null;
+    const sellerOrders: AdminSellerSubOrder[] = (row.seller_orders || []).map((so: any) => {
+      const store = so.stores || null;
+      const items: AdminOrderItem[] = (so.order_items || []).map((item: any) => ({
+        id: item.id,
+        productId: item.product_id,
+        productName: item.product_name,
+        productImage: item.product_image,
+        selectedSize: item.selected_size,
+        selectedColor: item.selected_color,
+        price: Number(item.price) || 0,
+        quantity: Number(item.quantity) || 1,
+        subtotal: Number(item.subtotal) || 0,
+      }));
+
+      const itemsCount = items.reduce((sum, it) => sum + it.quantity, 0);
+
+      return {
+        id: so.id,
+        subOrderNumber: so.sub_order_number,
+        storeId: so.store_id,
+        storeName: store?.name || 'Unknown Store',
+        storeSlug: store?.slug || null,
+        status: so.status as OrderStatus,
+        subtotal: Number(so.subtotal) || 0,
+        commissionAmount: Number(so.commission_amount) || 0,
+        sellerEarnings: Number(so.seller_earnings) || 0,
+        createdAt: so.created_at,
+        itemsCount,
+        items,
+      };
+    });
+
+    const totalItemsCount = sellerOrders.reduce((sum, so) => sum + so.itemsCount, 0);
+
+    return {
+      id: row.id,
+      orderNumber: row.order_number,
+      createdAt: row.created_at,
+      customerId: row.customer_id,
+      customerName: row.customer_name || customer?.full_name || 'Customer',
+      customerPhone: row.customer_phone || customer?.phone || '',
+      customerEmail: customer?.email || null,
+      deliveryAddress: row.delivery_address,
+      deliveryMethod: row.delivery_method,
+      paymentMethod: row.payment_method,
+      paymentStatus: row.payment_status,
+      totalAmount: Number(row.total_amount) || 0,
+      orderNotes: row.order_notes,
+      totalItemsCount,
+      sellerOrdersCount: sellerOrders.length,
+      sellerOrders,
+    };
+  });
+
+  return {
+    orders,
+    totalCount,
+    page,
+    limit: safeLimit,
+    totalPages,
+  };
+}
+
+/**
+ * Calculates marketplace platform metrics using service-role privileges on the server.
+ * Accurately aggregates GMV and commission amounts across all orders bypassing client RLS.
+ * Strictly gated to authenticated ADMIN users.
+ */
+export async function getAdminPlatformMetricsServer(): Promise<AdminPlatformMetrics> {
+  await assertAdminRole();
+
+  const serverSupabase = getServerSupabase();
+
+  const [
+    storesRes,
+    pendingStoresRes,
+    productsRes,
+    ordersRes,
+    gmvRes,
+    commissionRes,
+  ] = await Promise.all([
+    serverSupabase.from('stores').select('*', { count: 'exact', head: true }),
+    serverSupabase.from('stores').select('*', { count: 'exact', head: true }).eq('status', 'PENDING'),
+    serverSupabase.from('products').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
+    serverSupabase.from('parent_orders').select('*', { count: 'exact', head: true }),
+    serverSupabase.from('parent_orders').select('total_amount'),
+    serverSupabase.from('seller_orders').select('commission_amount'),
+  ]);
+
+  const gmv = (gmvRes.data || []).reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
+  const totalCommission = (commissionRes.data || []).reduce((sum, o) => sum + (Number(o.commission_amount) || 0), 0);
+
+  return {
+    storesCount: storesRes.count || 0,
+    pendingStoresCount: pendingStoresRes.count || 0,
+    productsCount: productsRes.count || 0,
+    ordersCount: ordersRes.count || 0,
+    gmv,
+    totalCommission,
+  };
+}
+

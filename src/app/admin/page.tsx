@@ -3,12 +3,15 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { requireRole } from '@/lib/auth';
 import {
-  getAdminPlatformMetrics,
+  getAdminPlatformMetricsServer,
   getAdminStoresList,
+  getAdminRecentOrders,
   AdminPlatformMetrics,
   AdminStoreListItem,
+  AdminOrderDetails,
 } from '@/lib/db';
 import AdminStoreApprover from '@/components/admin/AdminStoreApprover';
+import AdminOrderList from '@/components/admin/AdminOrderList';
 import { ShieldCheck, Store, ShoppingBag, Package, DollarSign, Users, Sparkles, CheckCircle, AlertCircle } from 'lucide-react';
 
 export const revalidate = 0;
@@ -23,20 +26,25 @@ export default async function AdminDashboardPage() {
   // NEVER trusts role from query params, request body, client state, or localStorage.
   const profile = await requireRole(['ADMIN'], '/account', '/');
 
-  // 2. Fetch admin metrics and stores strictly via existing DB layer functions.
+  // 2. Fetch admin metrics, stores, and orders strictly via server-only DB layer functions.
   // We do NOT substitute fake zeros if data loading fails.
   let metrics: AdminPlatformMetrics | null = null;
   let allStores: AdminStoreListItem[] = [];
+  let recentOrders: AdminOrderDetails[] = [];
+  let totalOrdersCount = 0;
   let loadError: string | null = null;
 
   try {
-    const [platformMetrics, storesList] = await Promise.all([
-      getAdminPlatformMetrics(),
+    const [platformMetrics, storesList, ordersResult] = await Promise.all([
+      getAdminPlatformMetricsServer(),
       getAdminStoresList(),
+      getAdminRecentOrders({ limit: 50 }),
     ]);
 
     metrics = platformMetrics;
     allStores = storesList;
+    recentOrders = ordersResult.orders;
+    totalOrdersCount = ordersResult.totalCount;
   } catch (err) {
     console.error('Failed to load admin dashboard data from Supabase DB layer:', err);
     loadError = err instanceof Error ? err.message : String(err);
@@ -140,26 +148,10 @@ export default async function AdminDashboardPage() {
       <AdminStoreApprover initialStores={initialStoresForApprover} />
 
       {/* All Marketplace Parent Orders */}
-      {/* 
-        NOTE: In the current DB layer (src/lib/db/queries.ts), there is NO query function 
-        for fetching global recent parent_orders for the Admin Dashboard.
-        Per strict constraints, direct Supabase calls (supabase.from) are not allowed in pages,
-        and modifying queries.ts is not permitted in this step.
-        This block displays a clear architectural status notice until an admin order query function is added.
-      */}
-      <div className="bg-white rounded-3xl border border-neutral-200 p-6 space-y-4 shadow-sm">
-        <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
-          <h3 className="text-lg font-serif font-bold text-neutral-900">Global Customer Orders</h3>
-          <span className="text-[11px] text-neutral-400 font-mono">DB Layer Integration Pending</span>
-        </div>
-        <div className="text-center py-8 px-4 text-neutral-500 text-xs bg-neutral-50 rounded-2xl border border-dashed border-neutral-200 space-y-2">
-          <p className="font-semibold text-neutral-700">Admin order listing function is not yet present in src/lib/db/queries.ts.</p>
-          <p className="text-neutral-500 max-w-md mx-auto">
-            Direct database queries from UI pages are forbidden to maintain clean architectural separation.
-            A dedicated query function (e.g. <code>getAdminRecentOrders()</code>) will be added to the DB layer in an authorized step.
-          </p>
-        </div>
-      </div>
+      <AdminOrderList
+        initialOrders={recentOrders}
+        totalCount={totalOrdersCount}
+      />
     </div>
   );
 }
