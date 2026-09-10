@@ -13,7 +13,27 @@ import {
   formatAiExtractionDetails,
 } from '@/lib/telegram/product-draft';
 
-const menu = { keyboard: [[{ text: '➕ Add Product' }, { text: '📦 My Products' }]], resize_keyboard: true };
+/**
+ * Returns localized ReplyKeyboardMarkup based on preferred language.
+ */
+function getLocalizedMenu(lang?: string | null) {
+  if (lang === 'uz') {
+    return {
+      keyboard: [[{ text: "➕ Mahsulot qo'shish" }, { text: '📦 Mening mahsulotlarim' }]],
+      resize_keyboard: true,
+    };
+  }
+  if (lang === 'en') {
+    return {
+      keyboard: [[{ text: '➕ Add Product' }, { text: '📦 My Products' }]],
+      resize_keyboard: true,
+    };
+  }
+  return {
+    keyboard: [[{ text: '➕ Добавить товар' }, { text: '📦 Мои товары' }]],
+    resize_keyboard: true,
+  };
+}
 
 export async function POST(request: NextRequest) {
   // 1. Enforce Telegram Webhook Secret Token validation
@@ -40,25 +60,7 @@ export async function POST(request: NextRequest) {
       const chatId = String(cb.message?.chat?.id || cb.from?.id);
       const data = String(cb.data || '');
 
-      // 2.1 Language selection
-      if (data.startsWith('language_')) {
-        await answerTelegramCallbackQuery(cbId);
-        const language = data.replace('language_', '');
-        const welcome: Record<string, string> = {
-          ru: '✅ Русский выбран. Отправьте фото товара, чтобы добавить его в магазин.',
-          uz: "✅ O'zbek tili tanlandi. Mahsulot qo'shish uchun rasmini yuboring.",
-          en: '✅ English selected. Send a product photo to add it to your store.',
-        };
-        const localizedMenu = language === 'uz'
-          ? { keyboard: [[{ text: "➕ Mahsulot qo'shish" }, { text: '📦 Mahsulotlarim' }]], resize_keyboard: true }
-          : language === 'ru'
-            ? { keyboard: [[{ text: '➕ Добавить товар' }, { text: '📦 Мои товары' }]], resize_keyboard: true }
-            : menu;
-        await sendTelegramMessage(chatId, welcome[language] ?? welcome.en, localizedMenu);
-        return NextResponse.json({ ok: true });
-      }
-
-      // Authenticate Telegram user
+      // Authenticate Telegram user strictly from chatId (never from callback data)
       const { data: user, error: userError } = await supabase
         .from('users')
         .select('id, role')
@@ -90,6 +92,44 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      // Read seller's current preferred language from Supabase Auth user_metadata
+      let sellerLang = 'ru';
+      try {
+        const { data: authData } = await supabase.auth.admin.getUserById(user.id);
+        const l = authData?.user?.user_metadata?.preferred_language;
+        if (l && ['ru', 'uz', 'en'].includes(l)) sellerLang = l;
+      } catch (e) {
+        console.warn('Could not read seller preferred_language:', e);
+      }
+
+      // 2.1 Language selection callback (language_ru, language_uz, language_en)
+      if (data.startsWith('language_')) {
+        const rawLang = data.replace('language_', '');
+        const validLang: 'ru' | 'uz' | 'en' = ['ru', 'uz', 'en'].includes(rawLang)
+          ? (rawLang as 'ru' | 'uz' | 'en')
+          : 'ru';
+
+        // Persist preferred_language in Supabase Auth user_metadata
+        try {
+          await supabase.auth.admin.updateUserById(user.id, {
+            user_metadata: { preferred_language: validLang },
+          });
+        } catch (metaErr) {
+          console.error('Failed to persist preferred_language in auth user_metadata:', metaErr);
+        }
+
+        await answerTelegramCallbackQuery(cbId);
+
+        const welcome: Record<string, string> = {
+          ru: `✅ <b>Русский язык сохранён!</b>\n\nИспользуйте меню ниже для управления магазином <b>${store.name}</b>.`,
+          uz: `✅ <b>O'zbek tili saqlandi!</b>\n\n<b>${store.name}</b> do'koningizni boshqarish uchun quyidagi menyudan foydalaning.`,
+          en: `✅ <b>English language saved!</b>\n\nUse the menu below to manage <b>${store.name}</b>.`,
+        };
+
+        await sendTelegramMessage(chatId, welcome[validLang], getLocalizedMenu(validLang));
+        return NextResponse.json({ ok: true });
+      }
+
       // 2.2 Cancel Draft Callback (e.g. cancel_<sessionId> or cancel_draft)
       if (data.startsWith('cancel_')) {
         await answerTelegramCallbackQuery(cbId, 'Draft cancelled');
@@ -99,10 +139,16 @@ export async function POST(request: NextRequest) {
           .eq('seller_telegram_id', chatId)
           .eq('store_id', store.id);
 
+        const cancelMsgs: Record<string, string> = {
+          ru: '❌ <b>Черновик товара отменён</b>\n\nНажмите ➕ Добавить товар или отправьте фото в любое время.',
+          uz: "❌ <b>Mahsulot qoralamasi bekor qilindi</b>\n\n➕ Mahsulot qo'shish tugmasini bosing yoki rasm yuboring.",
+          en: '❌ <b>Product Draft Cancelled</b>\n\nTap ➕ Add Product or send a photo anytime.',
+        };
+
         await sendTelegramMessage(
           chatId,
-          '❌ <b>Product Draft Cancelled</b>\n\nYour product draft has been safely discarded. You can send a new photo anytime.',
-          menu
+          cancelMsgs[sellerLang],
+          getLocalizedMenu(sellerLang)
         );
         return NextResponse.json({ ok: true });
       }
@@ -314,7 +360,11 @@ export async function POST(request: NextRequest) {
 
           if (existingProd) {
             await answerTelegramCallbackQuery(cbId, 'Already published!');
-            await sendTelegramMessage(chatId, `✅ <b>${existingProd.title}</b> is already live on TrendMall!`, menu);
+            await sendTelegramMessage(
+              chatId,
+              `✅ <b>${existingProd.title}</b> is already live on TrendMall!`,
+              getLocalizedMenu(sellerLang)
+            );
             return NextResponse.json({ ok: true });
           }
 
@@ -416,15 +466,31 @@ export async function POST(request: NextRequest) {
         await supabase.from('telegram_sessions').delete().eq('id', sessionId);
         await answerTelegramCallbackQuery(cbId, '🎉 Product published live!');
 
+        const publishSuccessMsgs: Record<string, string> = {
+          ru: `🎉 <b>Товар успешно опубликован!</b>\n\n` +
+              `Товар <b>"${newProduct.title}"</b> теперь активен в магазине <b>${store.name}</b>.\n\n` +
+              `💰 Цена: <b>${newProduct.price.toLocaleString()} UZS</b>\n` +
+              `📦 В наличии: <b>${newProduct.stock_quantity} шт.</b>\n` +
+              `📁 Статус: <b>ACTIVE</b>\n\n` +
+              `Покупатели уже могут найти и заказать этот товар на TrendMall.`,
+          uz: `🎉 <b>Mahsulot muvaffaqiyatli e'lon qilindi!</b>\n\n` +
+              `<b>"${newProduct.title}"</b> endi <b>${store.name}</b> do'konida faol.\n\n` +
+              `💰 Narxi: <b>${newProduct.price.toLocaleString()} UZS</b>\n` +
+              `📦 Omborda: <b>${newProduct.stock_quantity} dona</b>\n` +
+              `📁 Holati: <b>ACTIVE</b>\n\n` +
+              `Xaridorlar ushbu mahsulotni TrendMall'da xarid qilishlari mumkin.`,
+          en: `🎉 <b>Product Published Successfully!</b>\n\n` +
+              `Your product <b>"${newProduct.title}"</b> is now live in <b>${store.name}</b>.\n\n` +
+              `💰 Price: <b>${newProduct.price.toLocaleString()} UZS</b>\n` +
+              `📦 Available Stock: <b>${newProduct.stock_quantity} pcs</b>\n` +
+              `📁 Status: <b>ACTIVE</b>\n\n` +
+              `Customers can now discover and purchase this item on TrendMall.`,
+        };
+
         await sendTelegramMessage(
           chatId,
-          `🎉 <b>Product Published Successfully! / Mahsulot e'lon qilindi!</b>\n\n` +
-          `Your product <b>"${newProduct.title}"</b> is now live in <b>${store.name}</b>.\n\n` +
-          `💰 Price: <b>${newProduct.price.toLocaleString()} UZS</b>\n` +
-          `📦 Available Stock: <b>${newProduct.stock_quantity} pcs</b>\n` +
-          `📁 Status: <b>ACTIVE</b>\n\n` +
-          `Customers can now discover and purchase this item on TrendMall.`,
-          menu
+          publishSuccessMsgs[sellerLang],
+          getLocalizedMenu(sellerLang)
         );
         return NextResponse.json({ ok: true });
       }
@@ -441,7 +507,7 @@ export async function POST(request: NextRequest) {
     const chatId = String(message.chat.id);
     const text = message.text?.trim() || '';
 
-    // Handle One-Time Account Linking (/link CODE or /start CODE)
+    // 3.1 Handle One-Time Account Linking (/link CODE or /start CODE)
     let linkCode: string | null = null;
     if (text.startsWith('/link')) {
       linkCode = text.replace(/^\/link\s*/i, '').trim();
@@ -551,29 +617,43 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
-      await sendTelegramMessage(
-        chatId,
-        `✅ <b>Telegram Successfully Linked! / Telegram muvaffaqiyatli ulandi!</b>\n\n` +
-        `Your Telegram account is now connected to <b>${targetStore.name}</b>.\n\n` +
-        `You will receive instant alerts when customers place orders, and you can upload photos directly to publish products.`,
-        menu
-      );
+      // Check if language was previously selected in user_metadata
+      let initialLang: 'ru' | 'uz' | 'en' | null = null;
+      try {
+        const { data: authU } = await supabase.auth.admin.getUserById(matchedUser.id);
+        const l = authU?.user?.user_metadata?.preferred_language;
+        if (l && ['ru', 'uz', 'en'].includes(l)) initialLang = l as 'ru' | 'uz' | 'en';
+      } catch (e) {
+        // silent
+      }
+
+      if (initialLang) {
+        const welcomeConnected: Record<string, string> = {
+          ru: `✅ <b>Telegram успешно подключён!</b>\n\nВаш аккаунт связан с бутиком <b>${targetStore.name}</b>.\n\nИспользуйте меню ниже для работы с заказами и товарами.`,
+          uz: `✅ <b>Telegram muvaffaqiyatli ulandi!</b>\n\nSizning hisobingiz <b>${targetStore.name}</b> butigiga ulandi.\n\nBuyurtmalar va mahsulotlar bilan ishlash uchun quyidagi menyudan foydalaning.`,
+          en: `✅ <b>Telegram Successfully Linked!</b>\n\nYour account is connected to <b>${targetStore.name}</b>.\n\nUse the menu below to manage orders and inventory.`,
+        };
+        await sendTelegramMessage(chatId, welcomeConnected[initialLang], getLocalizedMenu(initialLang));
+      } else {
+        // First connection: prompt for language choice
+        await sendTelegramMessage(
+          chatId,
+          `✅ <b>Telegram Successfully Linked! / Telegram muvaffaqiyatli ulandi!</b>\n\n` +
+          `Your Telegram account is now connected to <b>${targetStore.name}</b>.\n\n` +
+          `🌐 <b>Пожалуйста, выберите язык / Iltimos, tilni tanlang:</b>`,
+          {
+            inline_keyboard: [[
+              { text: 'Русский', callback_data: 'language_ru' },
+              { text: "O'zbekcha", callback_data: 'language_uz' },
+              { text: 'English', callback_data: 'language_en' },
+            ]],
+          }
+        );
+      }
       return NextResponse.json({ ok: true });
     }
 
-    // Welcome / Language Selection for /start without parameters
-    if (text === '/start') {
-      await sendTelegramMessage(chatId, '🌐 <b>Выберите язык / Tilni tanlang / Choose a language</b>', {
-        inline_keyboard: [[
-          { text: 'Русский', callback_data: 'language_ru' },
-          { text: "O'zbekcha", callback_data: 'language_uz' },
-          { text: 'English', callback_data: 'language_en' },
-        ]],
-      });
-      return NextResponse.json({ ok: true });
-    }
-
-    // Authenticate user by verified telegram_id
+    // 3.2 Authenticate user strictly by verified telegram_id
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id, role')
@@ -595,7 +675,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Authorize seller store (strictly by owner_id)
+    // 3.3 Authorize seller store (strictly by owner_id)
     const { data: store, error: storeError } = await supabase
       .from('stores')
       .select('id, name, status')
@@ -620,7 +700,45 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // /cancel command: Safely cancels the active seller's draft session
+    // 3.4 Read seller's preferred language from Supabase Auth user_metadata
+    let preferredLanguage: 'ru' | 'uz' | 'en' | null = null;
+    try {
+      const { data: authUserData } = await supabase.auth.admin.getUserById(user.id);
+      const savedLang = authUserData?.user?.user_metadata?.preferred_language;
+      if (savedLang && ['ru', 'uz', 'en'].includes(savedLang)) {
+        preferredLanguage = savedLang as 'ru' | 'uz' | 'en';
+      }
+    } catch (langErr) {
+      console.warn('Failed to retrieve user_metadata for seller:', user.id, langErr);
+    }
+
+    const currentLangKey = preferredLanguage || 'ru';
+
+    // 3.5 Handle /start for authenticated APPROVED seller
+    if (text === '/start') {
+      if (preferredLanguage) {
+        // Seller has already chosen language: do NOT show language picker, immediately send menu!
+        const welcomeTexts: Record<string, string> = {
+          ru: `👋 <b>Добро пожаловать в TrendMall!</b>\n\nИспользуйте меню ниже для управления магазином <b>${store.name}</b>.`,
+          uz: `👋 <b>TrendMall'ga xush kelibsiz!</b>\n\n<b>${store.name}</b> do'koningizni boshqarish uchun quyidagi menyudan foydalaning.`,
+          en: `👋 <b>Welcome back to TrendMall!</b>\n\nUse the menu below to manage <b>${store.name}</b>.`,
+        };
+        await sendTelegramMessage(chatId, welcomeTexts[preferredLanguage], getLocalizedMenu(preferredLanguage));
+        return NextResponse.json({ ok: true });
+      }
+
+      // First time /start without saved language: ask once
+      await sendTelegramMessage(chatId, '🌐 <b>Выберите язык / Tilni tanlang / Choose a language</b>', {
+        inline_keyboard: [[
+          { text: 'Русский', callback_data: 'language_ru' },
+          { text: "O'zbekcha", callback_data: 'language_uz' },
+          { text: 'English', callback_data: 'language_en' },
+        ]],
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    // 3.6 /cancel command: Safely cancels only the active seller's unfinished draft session
     if (text === '/cancel' || text.toLowerCase() === 'cancel') {
       const { data: deletedSession } = await supabase
         .from('telegram_sessions')
@@ -629,34 +747,103 @@ export async function POST(request: NextRequest) {
         .eq('store_id', store.id)
         .select('id');
 
-      if (deletedSession && deletedSession.length > 0) {
-        await sendTelegramMessage(
-          chatId,
-          '❌ <b>Product Draft Cancelled</b>\n\nYour product draft was safely cancelled. Send a photo anytime to start a new product.',
-          menu
-        );
-      } else {
-        await sendTelegramMessage(
-          chatId,
-          'ℹ️ No active product draft found to cancel. Send a product photo anytime to add an item.',
-          menu
-        );
-      }
+      const cancelMsgs: Record<string, string> = {
+        ru: '❌ <b>Черновик товара отменён</b>\n\nНажмите ➕ Добавить товар или отправьте фото в любое время.',
+        uz: "❌ <b>Mahsulot qoralamasi bekor qilindi</b>\n\n➕ Mahsulot qo'shish tugmasini bosing yoki rasm yuboring.",
+        en: '❌ <b>Product Draft Cancelled</b>\n\nTap ➕ Add Product or send a photo anytime.',
+      };
+
+      const noSessionMsgs: Record<string, string> = {
+        ru: 'ℹ️ Нет активного черновика для отмены. Отправьте фото товара в любое время.',
+        uz: "ℹ️ Bekor qilish uchun faol qoralama topilmadi. Mahsulot rasmini istalgan vaqtda yuborishingiz mumkin.",
+        en: 'ℹ️ No active product draft found to cancel. Send a product photo anytime to add an item.',
+      };
+
+      const msg = deletedSession && deletedSession.length > 0
+        ? cancelMsgs[currentLangKey]
+        : noSessionMsgs[currentLangKey];
+
+      await sendTelegramMessage(chatId, msg, getLocalizedMenu(currentLangKey));
       return NextResponse.json({ ok: true });
     }
 
-    // Inventory query
-    if (text === '📦 My Products' || text === '📦 Мои товары' || text === "📦 Mahsulotlarim") {
+    // 3.7 Add Product button handler (ReplyKeyboardMarkup)
+    const isAddProductText =
+      text === '➕ Add Product' ||
+      text === '➕ Добавить товар' ||
+      text === "➕ Mahsulot qo'shish" ||
+      text.toLowerCase() === 'add product' ||
+      text.toLowerCase() === 'добавить товар';
+
+    if (isAddProductText) {
+      // Clean up previous unfinished draft sessions for this seller & store
+      await supabase
+        .from('telegram_sessions')
+        .delete()
+        .eq('seller_telegram_id', chatId)
+        .eq('store_id', store.id);
+
+      // Create a fresh telegram session using the existing schema
+      const freshSessionId = crypto.randomUUID();
+      const { error: newSessionErr } = await supabase.from('telegram_sessions').insert({
+        id: freshSessionId,
+        seller_telegram_id: chatId,
+        store_id: store.id,
+        step: 'AWAITING_PHOTO',
+        raw_image_url: null,
+        processed_image_url: null,
+        extracted_metadata: null,
+        draft: {},
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      if (newSessionErr) {
+        console.error('Failed to create fresh telegram session:', newSessionErr);
+      }
+
+      // Localized prompt for uploading a photo
+      const addProductPrompts: Record<string, string> = {
+        ru: '📸 <b>Отправьте фото товара.</b> Я распознаю его с помощью AI и подготовлю карточку товара.',
+        uz: "📸 <b>Mahsulot rasmini yuboring.</b> Men AI yordamida uni tahlil qilib, mahsulot kartasini tayyorlayman.",
+        en: "📸 <b>Send a photo of the product.</b> I'll analyze it with AI and prepare the product listing.",
+      };
+
+      const promptText = addProductPrompts[currentLangKey];
+      await sendTelegramMessage(chatId, promptText, {
+        inline_keyboard: [[{ text: '❌ Cancel', callback_data: `cancel_${freshSessionId}` }]],
+      });
+      return NextResponse.json({ ok: true });
+    }
+
+    // 3.8 Inventory query ('📦 My Products' / '📦 Мои товары' / '📦 Mening mahsulotlarim')
+    const isMyProductsText =
+      text === '📦 My Products' ||
+      text === '📦 Мои товары' ||
+      text === '📦 Mening mahsulotlarim' ||
+      text === "📦 Mahsulotlarim" ||
+      text.toLowerCase() === 'my products' ||
+      text.toLowerCase() === 'мои товары';
+
+    if (isMyProductsText) {
       const { count, error } = await supabase
         .from('products')
         .select('*', { count: 'exact', head: true })
         .eq('store_id', store.id);
+
       if (error) throw error;
-      await sendTelegramMessage(chatId, `📦 Products in <b>${store.name}</b>: <b>${count ?? 0}</b>`, menu);
+
+      const inventoryMsgs: Record<string, string> = {
+        ru: `📦 Товаров в магазине <b>${store.name}</b>: <b>${count ?? 0}</b>`,
+        uz: `📦 <b>${store.name}</b> do'konidagi mahsulotlar: <b>${count ?? 0}</b>`,
+        en: `📦 Products in <b>${store.name}</b>: <b>${count ?? 0}</b>`,
+      };
+
+      await sendTelegramMessage(chatId, inventoryMsgs[currentLangKey], getLocalizedMenu(currentLangKey));
       return NextResponse.json({ ok: true });
     }
 
-    // 3.1 Seller Uploads Photo
+    // 3.9 Seller Uploads Photo
     if (message.photo?.length) {
       const file = message.photo.at(-1);
       const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -846,7 +1033,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // 3.2 Handle Text Inputs for Active Session State Machine
+    // 3.10 Handle Text Inputs for Active Session State Machine
     const { data: activeSession } = await supabase
       .from('telegram_sessions')
       .select('*')
@@ -1027,10 +1214,16 @@ export async function POST(request: NextRequest) {
           `💰 Price: <b>${newProd.price.toLocaleString()} UZS</b>\n` +
           `📦 Stock: <b>${newProd.stock_quantity} pcs</b>\n` +
           `📁 Status: <b>ACTIVE</b>`,
-          menu
+          getLocalizedMenu(currentLangKey)
         );
         return NextResponse.json({ ok: true });
       }
+    }
+
+    // Diagnostic logging for unhandled text messages
+    if (text) {
+      const safeSnippet = text.replace(/[\r\n\t]/g, ' ').slice(0, 80);
+      console.log(`[Telegram] Unhandled text: "${safeSnippet}" chat=${chatId}`);
     }
 
     return NextResponse.json({ ok: true });
