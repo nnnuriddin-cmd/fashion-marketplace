@@ -68,7 +68,7 @@ export default function SellerTelegramGuidePage() {
               >
                 Go to Account to Link Telegram →
               </Link>
-              <div className="text-[10px] text-neutral-400">Generate code → send /link CODE to @TrendMallSellerBot</div>
+              <div className="text-[10px] text-neutral-400">Generate code → send /link CODE to @Modorauzbot</div>
             </div>
 
             <div className="pt-2 text-xs space-y-2 text-neutral-600 border-t border-neutral-100">

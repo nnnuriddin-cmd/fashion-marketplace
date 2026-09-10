@@ -152,12 +152,12 @@ export function TelegramConnectCard({
 
           <div className="flex items-center justify-between pt-2">
             <a
-              href="https://t.me/TrendMallSellerBot"
+              href="https://t.me/Modorauzbot"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-700 hover:text-sky-800"
             >
-              <span>Open @TrendMallSellerBot</span>
+              <span>Open @Modorauzbot</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
 
@@ -209,7 +209,7 @@ export function TelegramConnectCard({
                     Tap <strong>Open in Telegram</strong> below (recommended — automatically enters your code)
                   </li>
                   <li>
-                    Or send manually to <strong>@TrendMallSellerBot</strong>:
+                    Or send manually to <strong>@Modorauzbot</strong>:
                     <div className="mt-1 font-mono text-[10px] text-amber-300 bg-neutral-950 p-2 rounded break-all select-all">
                       /link {code}
                     </div>
@@ -220,7 +220,7 @@ export function TelegramConnectCard({
 
               <div className="pt-2 flex flex-col sm:flex-row items-center gap-2.5">
                 <a
-                  href={`https://t.me/TrendMallSellerBot?start=${code}`}
+                  href={`https://t.me/Modorauzbot?start=${code}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full sm:w-auto text-center bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs uppercase tracking-wider px-5 py-2.5 rounded-xl transition-colors flex items-center justify-center gap-1.5"
