@@ -34,6 +34,74 @@ Follow these strict guidelines:
 Return strictly raw JSON with no markdown formatting or commentary.`;
 
 /**
+ * Structured JSON Schema for Gemini generateContent responseSchema.
+ * Strictly mirrors VisionAnalysisResult attributes and adheres to Gemini REST schema specification.
+ */
+const VISION_ANALYSIS_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    title: {
+      type: 'STRING',
+      description: 'Concise fashion product title, 3-120 characters',
+    },
+    description: {
+      type: 'STRING',
+      description: 'Factual 2-3 sentence product description',
+    },
+    category: {
+      type: 'STRING',
+      description: 'Primary fashion category',
+    },
+    brand: {
+      type: ['STRING', 'NULL'],
+    },
+    color: {
+      type: 'STRING',
+      description: 'Dominant product color or colors',
+    },
+    material: {
+      type: ['STRING', 'NULL'],
+    },
+    gender: {
+      type: 'STRING',
+      enum: ['WOMEN', 'MEN', 'UNISEX', 'KIDS'],
+    },
+    style: {
+      type: ['STRING', 'NULL'],
+    },
+    occasion: {
+      type: ['STRING', 'NULL'],
+    },
+    season: {
+      type: ['STRING', 'NULL'],
+    },
+    tags: {
+      type: 'ARRAY',
+      items: {
+        type: 'STRING',
+      },
+    },
+    suggestedPrice: {
+      type: ['INTEGER', 'NULL'],
+    },
+  },
+  required: [
+    'title',
+    'description',
+    'category',
+    'brand',
+    'color',
+    'material',
+    'gender',
+    'style',
+    'occasion',
+    'season',
+    'tags',
+    'suggestedPrice',
+  ],
+};
+
+/**
  * Sanitizes a string by stripping HTML tags, control characters, and normalizing whitespace.
  */
 function sanitizeString(val: unknown, maxLen: number, fallback = ''): string {
@@ -212,8 +280,9 @@ export async function analyzeClothingImage(
           temperature: 0.2,
           topK: 32,
           topP: 0.95,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 2048,
           responseMimeType: 'application/json',
+          responseSchema: VISION_ANALYSIS_SCHEMA,
         },
       }),
     });
@@ -231,16 +300,41 @@ export async function analyzeClothingImage(
 
   const data = await response.json();
   const candidate = data?.candidates?.[0];
-  const rawText = candidate?.content?.parts?.[0]?.text;
 
-  if (!rawText) {
+  // Collect text across all parts if available
+  const parts = candidate?.content?.parts;
+  let rawText = '';
+  if (Array.isArray(parts)) {
+    rawText = parts
+      .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
+      .join('');
+  } else if (typeof candidate?.content?.parts?.[0]?.text === 'string') {
+    rawText = candidate.content.parts[0].text;
+  }
+
+  const trimmed = rawText.trim();
+
+  if (!trimmed) {
     const finishReason = candidate?.finishReason || 'UNKNOWN';
     throw new Error(`Gemini Vision produced no text output (finishReason: ${finishReason})`);
   }
 
+  let cleanJson = trimmed;
+
+  if (cleanJson.startsWith('```')) {
+    cleanJson = cleanJson
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+  } else {
+    const codeBlockMatch = cleanJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    if (codeBlockMatch && codeBlockMatch[1]) {
+      cleanJson = codeBlockMatch[1].trim();
+    }
+  }
+
   let parsedJson: unknown;
   try {
-    const cleanJson = rawText.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
     parsedJson = JSON.parse(cleanJson);
   } catch {
     throw new Error('Gemini Vision returned invalid JSON format');
