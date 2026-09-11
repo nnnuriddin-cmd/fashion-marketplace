@@ -111,9 +111,12 @@ export async function POST(request: NextRequest) {
 
         // Persist preferred_language in Supabase Auth user_metadata
         try {
-          await supabase.auth.admin.updateUserById(user.id, {
+          const { error: updateErr } = await supabase.auth.admin.updateUserById(user.id, {
             user_metadata: { preferred_language: validLang },
           });
+          if (updateErr) {
+            console.error('Failed to persist preferred_language in auth user_metadata:', updateErr);
+          }
         } catch (metaErr) {
           console.error('Failed to persist preferred_language in auth user_metadata:', metaErr);
         }
@@ -635,11 +638,26 @@ export async function POST(request: NextRequest) {
         };
         await sendTelegramMessage(chatId, welcomeConnected[initialLang], getLocalizedMenu(initialLang));
       } else {
-        // First connection: prompt for language choice
+        // First connection: default to 'ru' and persist it
+        const fallbackLang: 'ru' = 'ru';
+        try {
+          const { error: persistErr } = await supabase.auth.admin.updateUserById(matchedUser.id, {
+            user_metadata: { preferred_language: fallbackLang },
+          });
+          if (persistErr) {
+            console.error('Failed to persist fallback language on link for user:', matchedUser.id, persistErr);
+          }
+        } catch (e) {
+          console.error('Unexpected error persisting fallback language on link:', e);
+        }
+
+        // a) Send welcome/menu message with ReplyKeyboardMarkup (bottom keyboard armed immediately)
+        const welcomeConnectedFirst = `✅ <b>Telegram успешно подключён!</b>\n\nВаш аккаунт связан с бутиком <b>${targetStore.name}</b>.\n\nИспользуйте меню ниже для работы с заказами и товарами.`;
+        await sendTelegramMessage(chatId, welcomeConnectedFirst, getLocalizedMenu(fallbackLang));
+
+        // b) Also prompt for language choice via InlineKeyboardMarkup so seller can change if desired
         await sendTelegramMessage(
           chatId,
-          `✅ <b>Telegram Successfully Linked! / Telegram muvaffaqiyatli ulandi!</b>\n\n` +
-          `Your Telegram account is now connected to <b>${targetStore.name}</b>.\n\n` +
           `🌐 <b>Пожалуйста, выберите язык / Iltimos, tilni tanlang:</b>`,
           {
             inline_keyboard: [[
@@ -703,7 +721,10 @@ export async function POST(request: NextRequest) {
     // 3.4 Read seller's preferred language from Supabase Auth user_metadata
     let preferredLanguage: 'ru' | 'uz' | 'en' | null = null;
     try {
-      const { data: authUserData } = await supabase.auth.admin.getUserById(user.id);
+      const { data: authUserData, error: authUserErr } = await supabase.auth.admin.getUserById(user.id);
+      if (authUserErr) {
+        console.warn('Failed to retrieve user_metadata for seller:', user.id, authUserErr);
+      }
       const savedLang = authUserData?.user?.user_metadata?.preferred_language;
       if (savedLang && ['ru', 'uz', 'en'].includes(savedLang)) {
         preferredLanguage = savedLang as 'ru' | 'uz' | 'en';
@@ -712,29 +733,47 @@ export async function POST(request: NextRequest) {
       console.warn('Failed to retrieve user_metadata for seller:', user.id, langErr);
     }
 
-    const currentLangKey = preferredLanguage || 'ru';
+    const currentLangKey: 'ru' | 'uz' | 'en' = preferredLanguage || 'ru';
 
     // 3.5 Handle /start for authenticated APPROVED seller
     if (text === '/start') {
+      const welcomeTexts: Record<string, string> = {
+        ru: `👋 <b>Добро пожаловать в TrendMall!</b>\n\nИспользуйте меню ниже для управления магазином <b>${store.name}</b>.`,
+        uz: `👋 <b>TrendMall'ga xush kelibsiz!</b>\n\n<b>${store.name}</b> do'koningizni boshqarish uchun quyidagi menyudan foydalaning.`,
+        en: `👋 <b>Welcome back to TrendMall!</b>\n\nUse the menu below to manage <b>${store.name}</b>.`,
+      };
+
       if (preferredLanguage) {
-        // Seller has already chosen language: do NOT show language picker, immediately send menu!
-        const welcomeTexts: Record<string, string> = {
-          ru: `👋 <b>Добро пожаловать в TrendMall!</b>\n\nИспользуйте меню ниже для управления магазином <b>${store.name}</b>.`,
-          uz: `👋 <b>TrendMall'ga xush kelibsiz!</b>\n\n<b>${store.name}</b> do'koningizni boshqarish uchun quyidagi menyudan foydalaning.`,
-          en: `👋 <b>Welcome back to TrendMall!</b>\n\nUse the menu below to manage <b>${store.name}</b>.`,
-        };
+        // Seller has already chosen language: immediately send localized welcome message with ReplyKeyboardMarkup
         await sendTelegramMessage(chatId, welcomeTexts[preferredLanguage], getLocalizedMenu(preferredLanguage));
         return NextResponse.json({ ok: true });
       }
 
-      // First time /start without saved language: ask once
-      await sendTelegramMessage(chatId, '🌐 <b>Выберите язык / Tilni tanlang / Choose a language</b>', {
+      // First-time /start when language is missing: fallback to 'ru' and persist it
+      const fallbackLang: 'ru' = 'ru';
+      try {
+        const { error: persistErr } = await supabase.auth.admin.updateUserById(user.id, {
+          user_metadata: { preferred_language: fallbackLang },
+        });
+        if (persistErr) {
+          console.error('Failed to persist fallback preferred_language for seller:', user.id, persistErr);
+        }
+      } catch (persistErr) {
+        console.error('Unexpected error persisting fallback preferred_language:', persistErr);
+      }
+
+      // a) Send welcome/menu message with ReplyKeyboardMarkup (seller gets bottom keyboard immediately)
+      await sendTelegramMessage(chatId, welcomeTexts[fallbackLang], getLocalizedMenu(fallbackLang));
+
+      // b) Also show inline language picker so seller can choose another language without replacing the keyboard
+      await sendTelegramMessage(chatId, '🌐 <b>Выберите язык / Tilni tanlang / Choose a language:</b>', {
         inline_keyboard: [[
           { text: 'Русский', callback_data: 'language_ru' },
           { text: "O'zbekcha", callback_data: 'language_uz' },
           { text: 'English', callback_data: 'language_en' },
         ]],
       });
+
       return NextResponse.json({ ok: true });
     }
 
