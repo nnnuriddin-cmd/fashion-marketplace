@@ -44,6 +44,34 @@ export async function answerTelegramCallbackQuery(callbackQueryId: string, text?
   }
 }
 
+export async function clearTelegramInlineKeyboard(chatId: string | number, messageId: number) {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) {
+    console.log(`[TELEGRAM NOTIFIER LOG] (No BOT_TOKEN set) -> Clear inline keyboard for chat ${chatId}, message ${messageId}`);
+    return { ok: true, simulated: true };
+  }
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageReplyMarkup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: [] },
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      console.warn(`[TELEGRAM NOTIFIER] editMessageReplyMarkup non-ok for chat ${chatId}, msg ${messageId}:`, data.description);
+    }
+    return data;
+  } catch (err) {
+    console.error(`Failed to clear Telegram inline keyboard for chat ${chatId}, msg ${messageId}:`, err);
+    return { ok: false, error: String(err) };
+  }
+}
+
 export async function notifySellerNewOrder(sellerOrderId: string) {
   try {
     const sellerOrder = await getSellerOrderForNotification(sellerOrderId);

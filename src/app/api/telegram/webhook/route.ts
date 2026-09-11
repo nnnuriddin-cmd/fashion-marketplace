@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getServerSupabase } from '@/lib/supabase-server';
-import { sendTelegramMessage, answerTelegramCallbackQuery } from '@/lib/telegram/notifier';
+import {
+  sendTelegramMessage,
+  answerTelegramCallbackQuery,
+  clearTelegramInlineKeyboard,
+} from '@/lib/telegram/notifier';
 import { processAndStoreProductImage } from '@/lib/ai/image-processor';
 import { analyzeClothingImage, VisionAnalysisResult } from '@/lib/ai/vision-analyzer';
 import {
@@ -33,6 +37,53 @@ function getLocalizedMenu(lang?: string | null) {
     keyboard: [[{ text: '➕ Добавить товар' }, { text: '📦 Мои товары' }]],
     resize_keyboard: true,
   };
+}
+
+/**
+ * Formats the AI extraction card, step 1 price prompt, and inline keyboard.
+ * Only offers the "Use {price} UZS" button if suggestedPrice is an integer >= 1000.
+ */
+function buildPriceStepPromptAndKeyboard(
+  ai: any,
+  categoryName: string,
+  brandName: string | null,
+  sessionId: string
+) {
+  const suggestedPrice = ai?.suggestedPrice;
+  const hasValidSuggestedPrice =
+    typeof suggestedPrice === 'number' &&
+    Number.isInteger(suggestedPrice) &&
+    suggestedPrice >= 1000;
+
+  const rawDetails = formatAiExtractionDetails(
+    { ...ai, suggestedPrice: undefined },
+    categoryName,
+    brandName
+  );
+  const stepHeader = '💰 <b>Step 1/2 — Set Product Price</b>';
+  const baseCard = rawDetails.includes(stepHeader)
+    ? rawDetails.split(stepHeader)[0] + stepHeader
+    : rawDetails;
+
+  let promptText = '';
+  let keyboard: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
+
+  if (hasValidSuggestedPrice) {
+    promptText = `${baseCard}\n\n💡 Suggested price: ${suggestedPrice.toLocaleString()} UZS\nTap below to use it, or type your own price in UZS:`;
+    keyboard = {
+      inline_keyboard: [
+        [{ text: `✅ Use ${suggestedPrice.toLocaleString()} UZS`, callback_data: `set_price_${suggestedPrice}` }],
+        [{ text: '❌ Cancel', callback_data: `cancel_${sessionId}` }],
+      ],
+    };
+  } else {
+    promptText = `${baseCard}\n\n✍️ Please enter the price in UZS (minimum 1,000 UZS):\nExample: 150000`;
+    keyboard = {
+      inline_keyboard: [[{ text: '❌ Cancel', callback_data: `cancel_${sessionId}` }]],
+    };
+  }
+
+  return { promptText, keyboard };
 }
 
 export async function POST(request: NextRequest) {
@@ -123,6 +174,11 @@ export async function POST(request: NextRequest) {
 
         await answerTelegramCallbackQuery(cbId);
 
+        // Clear the inline keyboard from the original language-picker message
+        if (cb.message?.message_id) {
+          await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
+        }
+
         const welcome: Record<string, string> = {
           ru: `✅ <b>Русский язык сохранён!</b>\n\nИспользуйте меню ниже для управления магазином <b>${store.name}</b>.`,
           uz: `✅ <b>O'zbek tili saqlandi!</b>\n\n<b>${store.name}</b> do'koningizni boshqarish uchun quyidagi menyudan foydalaning.`,
@@ -136,6 +192,11 @@ export async function POST(request: NextRequest) {
       // 2.2 Cancel Draft Callback (e.g. cancel_<sessionId> or cancel_draft)
       if (data.startsWith('cancel_')) {
         await answerTelegramCallbackQuery(cbId, 'Draft cancelled');
+
+        if (cb.message?.message_id) {
+          await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
+        }
+
         await supabase
           .from('telegram_sessions')
           .delete()
@@ -161,9 +222,16 @@ export async function POST(request: NextRequest) {
         const priceStr = data.replace('set_price_', '');
         const priceRes = validatePriceInput(priceStr);
 
-        if (!priceRes.valid || !priceRes.price) {
-          await answerTelegramCallbackQuery(cbId, 'Invalid price');
+        if (!priceRes.valid || !priceRes.price || priceRes.price < 1000) {
+          if (cb.message?.message_id) {
+            await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
+          }
+          await answerTelegramCallbackQuery(cbId, 'Invalid price (min 1,000 UZS)');
           return NextResponse.json({ ok: true });
+        }
+
+        if (cb.message?.message_id) {
+          await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
         }
 
         const { data: session } = await supabase
@@ -286,6 +354,10 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ ok: true });
         }
 
+        if (cb.message?.message_id) {
+          await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
+        }
+
         const { data: session } = await supabase
           .from('telegram_sessions')
           .select('*')
@@ -318,19 +390,14 @@ export async function POST(request: NextRequest) {
         await answerTelegramCallbackQuery(cbId, `Category: ${cat.name}`);
 
         const ai = session.draft?.ai || session.extracted_metadata || {};
-        const msg = formatAiExtractionDetails(ai, cat.name, session.draft?.brand_name || null);
-        const keyboard = ai.suggestedPrice && ai.suggestedPrice > 0
-          ? {
-              inline_keyboard: [
-                [{ text: `✅ Use ${ai.suggestedPrice.toLocaleString()} UZS`, callback_data: `set_price_${ai.suggestedPrice}` }],
-                [{ text: '❌ Cancel', callback_data: `cancel_${session.id}` }],
-              ],
-            }
-          : {
-              inline_keyboard: [[{ text: '❌ Cancel', callback_data: `cancel_${session.id}` }]],
-            };
+        const { promptText, keyboard } = buildPriceStepPromptAndKeyboard(
+          ai,
+          cat.name,
+          session.draft?.brand_name || null,
+          session.id
+        );
 
-        await sendTelegramMessage(chatId, msg, keyboard);
+        await sendTelegramMessage(chatId, promptText, keyboard);
         return NextResponse.json({ ok: true });
       }
 
@@ -984,19 +1051,14 @@ export async function POST(request: NextRequest) {
 
           if (sessionErr) throw sessionErr;
 
-          const detailsMsg = formatAiExtractionDetails(aiResult, mappedCat.categoryName, mappedBrand.brandName);
-          const keyboard = aiResult.suggestedPrice && aiResult.suggestedPrice > 0
-            ? {
-                inline_keyboard: [
-                  [{ text: `✅ Use ${aiResult.suggestedPrice.toLocaleString()} UZS`, callback_data: `set_price_${aiResult.suggestedPrice}` }],
-                  [{ text: '❌ Cancel', callback_data: `cancel_${sessionId}` }],
-                ],
-              }
-            : {
-                inline_keyboard: [[{ text: '❌ Cancel', callback_data: `cancel_${sessionId}` }]],
-              };
+          const { promptText, keyboard } = buildPriceStepPromptAndKeyboard(
+            aiResult,
+            mappedCat.categoryName,
+            mappedBrand.brandName,
+            sessionId
+          );
 
-          await sendTelegramMessage(chatId, detailsMsg, keyboard);
+          await sendTelegramMessage(chatId, promptText, keyboard);
         } else {
           // Category could not be safely determined: ask seller to pick a valid category
           const { error: sessionErr } = await supabase.from('telegram_sessions').insert({
