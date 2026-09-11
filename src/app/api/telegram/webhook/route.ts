@@ -121,7 +121,7 @@ export async function POST(request: NextRequest) {
       if (userError) throw userError;
 
       if (!user || user.role !== 'SELLER') {
-        await answerTelegramCallbackQuery(cbId, 'Access denied: Registered sellers only');
+        await answerTelegramCallbackQuery(cbId, 'Access denied: Registered sellers only', true);
         return NextResponse.json({ ok: true });
       }
 
@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
       if (storeError) throw storeError;
 
       if (!store || store.status !== 'APPROVED') {
-        await answerTelegramCallbackQuery(cbId, 'Store is not active');
+        await answerTelegramCallbackQuery(cbId, 'Store is not active', true);
         await sendTelegramMessage(
           chatId,
           `⚠️ <b>Store Inactive</b>\n\nYour store "${store?.name || 'Unknown'}" is currently ${store?.status || 'NOT APPROVED'}. Cannot perform product operations.`
@@ -226,12 +226,8 @@ export async function POST(request: NextRequest) {
           if (cb.message?.message_id) {
             await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
           }
-          await answerTelegramCallbackQuery(cbId, 'Invalid price (min 1,000 UZS)');
+          await answerTelegramCallbackQuery(cbId, 'Invalid price (min 1,000 UZS)', true);
           return NextResponse.json({ ok: true });
-        }
-
-        if (cb.message?.message_id) {
-          await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
         }
 
         const { data: session } = await supabase
@@ -244,8 +240,14 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
 
         if (!session) {
-          await answerTelegramCallbackQuery(cbId, 'No active draft session');
+          await answerTelegramCallbackQuery(cbId, 'No active draft session', true);
           return NextResponse.json({ ok: true });
+        }
+
+        await answerTelegramCallbackQuery(cbId, `Price set: ${priceRes.price.toLocaleString()} UZS`);
+
+        if (cb.message?.message_id) {
+          await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
         }
 
         const updatedDraft = { ...(session.draft || {}), price: priceRes.price };
@@ -258,7 +260,6 @@ export async function POST(request: NextRequest) {
           })
           .eq('id', session.id);
 
-        await answerTelegramCallbackQuery(cbId, `Price set: ${priceRes.price.toLocaleString()} UZS`);
         await sendTelegramMessage(
           chatId,
           `✅ <b>Price Confirmed:</b> <b>${priceRes.price.toLocaleString()} UZS</b>\n\n` +
@@ -284,7 +285,7 @@ export async function POST(request: NextRequest) {
         const stockRes = validateStockInput(stockStr);
 
         if (!stockRes.valid || !stockRes.stock) {
-          await answerTelegramCallbackQuery(cbId, 'Invalid stock');
+          await answerTelegramCallbackQuery(cbId, 'Invalid stock quantity', true);
           return NextResponse.json({ ok: true });
         }
 
@@ -298,10 +299,19 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
 
         if (!session || !session.draft?.price) {
-          await answerTelegramCallbackQuery(cbId, 'Please enter price first');
+          await answerTelegramCallbackQuery(cbId, 'Please enter product price first', true);
           return NextResponse.json({ ok: true });
         }
 
+        // 1. Acknowledge callback promptly
+        await answerTelegramCallbackQuery(cbId, `Stock set: ${stockRes.stock} pcs`);
+
+        // 2. Clear old stock keyboard
+        if (cb.message?.message_id) {
+          await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
+        }
+
+        // 3. Update session to AWAITING_PUBLICATION_CONFIRMATION
         const updatedDraft = { ...(session.draft || {}), stock: stockRes.stock };
         await supabase
           .from('telegram_sessions')
@@ -311,8 +321,6 @@ export async function POST(request: NextRequest) {
             updated_at: new Date().toISOString(),
           })
           .eq('id', session.id);
-
-        await answerTelegramCallbackQuery(cbId, `Stock set: ${stockRes.stock} pcs`);
 
         const ai = session.draft?.ai || session.extracted_metadata || {};
         const previewText = formatProductPreview({
@@ -350,12 +358,8 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
 
         if (!cat) {
-          await answerTelegramCallbackQuery(cbId, 'Category not found');
+          await answerTelegramCallbackQuery(cbId, 'Category not found', true);
           return NextResponse.json({ ok: true });
-        }
-
-        if (cb.message?.message_id) {
-          await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
         }
 
         const { data: session } = await supabase
@@ -368,8 +372,14 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
 
         if (!session) {
-          await answerTelegramCallbackQuery(cbId, 'Session expired');
+          await answerTelegramCallbackQuery(cbId, 'Session expired', true);
           return NextResponse.json({ ok: true });
+        }
+
+        await answerTelegramCallbackQuery(cbId, `Category: ${cat.name}`);
+
+        if (cb.message?.message_id) {
+          await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
         }
 
         const updatedDraft = {
@@ -386,8 +396,6 @@ export async function POST(request: NextRequest) {
             updated_at: new Date().toISOString(),
           })
           .eq('id', session.id);
-
-        await answerTelegramCallbackQuery(cbId, `Category: ${cat.name}`);
 
         const ai = session.draft?.ai || session.extracted_metadata || {};
         const { promptText, keyboard } = buildPriceStepPromptAndKeyboard(
@@ -429,7 +437,7 @@ export async function POST(request: NextRequest) {
             .maybeSingle();
 
           if (existingProd) {
-            await answerTelegramCallbackQuery(cbId, 'Already published!');
+            await answerTelegramCallbackQuery(cbId, 'Already published!', true);
             await sendTelegramMessage(
               chatId,
               `✅ <b>${existingProd.title}</b> is already live on TrendMall!`,
@@ -438,8 +446,16 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ ok: true });
           }
 
-          await answerTelegramCallbackQuery(cbId, 'Draft session expired or already processed');
+          await answerTelegramCallbackQuery(cbId, 'Draft session expired or already processed', true);
           return NextResponse.json({ ok: true });
+        }
+
+        // Acknowledge callback promptly so the Telegram client stops spinning
+        await answerTelegramCallbackQuery(cbId, 'Publishing product live...');
+
+        // Clear the original inline keyboard so Publish cannot be repeatedly tapped
+        if (cb.message?.message_id) {
+          await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
         }
 
         const draft = lockedSession.draft || {};

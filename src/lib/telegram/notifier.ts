@@ -25,7 +25,11 @@ export async function sendTelegramMessage(chatId: string, text: string, replyMar
   }
 }
 
-export async function answerTelegramCallbackQuery(callbackQueryId: string, text?: string) {
+export async function answerTelegramCallbackQuery(
+  callbackQueryId: string,
+  text?: string,
+  showAlert: boolean = false
+) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   if (!botToken) return { ok: true, simulated: true };
   try {
@@ -35,6 +39,7 @@ export async function answerTelegramCallbackQuery(callbackQueryId: string, text?
       body: JSON.stringify({
         callback_query_id: callbackQueryId,
         text,
+        show_alert: showAlert,
       }),
     });
     return await res.json();
