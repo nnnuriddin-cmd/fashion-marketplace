@@ -1,7 +1,8 @@
 import React from 'react';
 import { supabase } from '@/lib/supabase';
 import StoreCard from '@/components/customer/StoreCard';
-import { Store as StoreIcon, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
+import { T } from '@/lib/i18n/translations';
 
 export const revalidate = 0;
 
@@ -20,11 +21,11 @@ export default async function StoresDirectoryPage() {
       <div className="bg-white p-6 sm:p-8 rounded-3xl border border-neutral-200 shadow-sm space-y-2">
         <div className="flex items-center gap-2 text-amber-800 font-bold text-xs uppercase tracking-wider">
           <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <span>Multi-Vendor Fashion Mall</span>
+          <span><T k="stores.badge" /></span>
         </div>
-        <h1 className="text-3xl font-serif font-bold text-neutral-900">All Stores & Boutiques</h1>
+        <h1 className="text-3xl font-serif font-bold text-neutral-900"><T k="stores.title" /></h1>
         <p className="text-xs text-neutral-500 max-w-xl">
-          Explore physical clothing stores, Instagram sellers, and artisan fashion ateliers selling on TrendMall.
+          <T k="stores.subtitle" />
         </p>
       </div>
 

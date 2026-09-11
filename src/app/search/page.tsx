@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { searchProducts, getRootCategories, getBrands, getAllApprovedStores } from '@/lib/db';
 import ProductCard from '@/components/customer/ProductCard';
 import { Filter, SlidersHorizontal, Search as SearchIcon, RotateCcw, Sparkles } from 'lucide-react';
+import { T, LocalizedInput } from '@/lib/i18n/translations';
 
 export const revalidate = 0;
 
@@ -164,28 +165,33 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-serif font-bold text-neutral-900">
-              {q ? `Search results for "${q}"` : 'Explore Fashion Marketplace'}
+              {q ? (
+                <>
+                  <T k="search.resultsFor" /> &ldquo;{q}&rdquo;
+                </>
+              ) : (
+                <T k="search.exploreTitle" />
+              )}
             </h1>
             <p className="text-xs text-neutral-500">
-              Showing {products.length} products across Tashkent boutiques
+              {products.length} <T k="search.showingProducts" />
             </p>
           </div>
 
           {/* AI Semantic Natural Language Search Prompt */}
           <div className="inline-flex items-center gap-2 bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-lg text-xs">
             <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
-            <span>AI Search Ready: "black elegant dress for wedding under 500k"</span>
+            <span><T k="search.aiPrompt" /></span>
           </div>
         </div>
 
         {/* Search Bar Form */}
         <form action="/search" method="GET" className="flex gap-2">
           <div className="relative flex-1">
-            <input
-              type="text"
+            <LocalizedInput
               name="q"
               defaultValue={q || ''}
-              placeholder="Search by keywords e.g. linen blazer, silk slip dress, bomber jacket..."
+              placeholderKey="search.inputPlaceholder"
               className="w-full bg-neutral-50 border border-neutral-200 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
             />
             <SearchIcon className="w-4 h-4 text-neutral-400 absolute left-3.5 top-3.5" />
@@ -200,7 +206,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             type="submit"
             className="bg-neutral-900 hover:bg-neutral-800 text-white font-semibold px-6 py-2.5 rounded-xl text-xs uppercase tracking-wider transition-colors"
           >
-            Search
+            <T k="search.button" />
           </button>
         </form>
       </div>
@@ -212,22 +218,22 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           <div className="flex items-center justify-between pb-3 border-b border-neutral-100">
             <div className="flex items-center gap-2 font-bold text-neutral-900 text-sm">
               <SlidersHorizontal className="w-4 h-4 text-amber-800" />
-              <span>Filters & Facets</span>
+              <span><T k="search.filters" /></span>
             </div>
             <Link href="/search" className="text-[11px] text-amber-800 font-semibold flex items-center gap-1 hover:underline">
-              <RotateCcw className="w-3 h-3" /> Reset
+              <RotateCcw className="w-3 h-3" /> <T k="search.reset" />
             </Link>
           </div>
 
           {/* Gender Filter */}
           <div className="space-y-2">
-            <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider">Gender</h4>
+            <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider"><T k="search.gender" /></h4>
             <div className="flex flex-wrap gap-1.5">
               {[
-                { label: 'All', value: '' },
-                { label: "Women's", value: 'WOMEN' },
-                { label: "Men's", value: 'MEN' },
-                { label: 'Unisex', value: 'UNISEX' },
+                { key: 'search.genderAll' as const, value: '' },
+                { key: 'search.genderWomen' as const, value: 'WOMEN' },
+                { key: 'search.genderMen' as const, value: 'MEN' },
+                { key: 'search.genderUnisex' as const, value: 'UNISEX' },
               ].map((g) => {
                 const params = new URLSearchParams({ ...safeSearchParams });
                 if (g.value) {
@@ -237,7 +243,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                 }
                 return (
                   <Link
-                    key={g.label}
+                    key={g.key}
                     href={`/search?${params.toString()}`}
                     className={`text-xs px-3 py-1 rounded-full border transition-all ${
                       (gender || '') === g.value
@@ -245,7 +251,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                         : 'bg-neutral-50 text-neutral-700 border-neutral-200 hover:border-neutral-400'
                     }`}
                   >
-                    {g.label}
+                    <T k={g.key} />
                   </Link>
                 );
               })}
@@ -254,7 +260,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
           {/* Category Filter */}
           <div className="space-y-2">
-            <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider">Category</h4>
+            <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider"><T k="search.category" /></h4>
             <ul className="space-y-1 text-xs">
               <li>
                 {(() => {
@@ -265,7 +271,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                       href={`/search?${params.toString()}`}
                       className={`block py-1 hover:text-amber-800 ${!category ? 'font-bold text-amber-800' : 'text-neutral-600'}`}
                     >
-                      All Categories
+                      <T k="common.all" />
                     </Link>
                   );
                 })()}
@@ -289,7 +295,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
           {/* Stores Filter */}
           <div className="space-y-2">
-            <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider">Store / Boutique</h4>
+            <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider"><T k="search.storeBoutique" /></h4>
             <div className="flex flex-col gap-1 text-xs max-h-48 overflow-y-auto pr-1">
               {(() => {
                 const params = new URLSearchParams({ ...safeSearchParams });
@@ -299,7 +305,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                     href={`/search?${params.toString()}`}
                     className={`block py-1 px-2 rounded hover:bg-neutral-100 ${!store ? 'font-bold text-amber-800 bg-amber-50' : 'text-neutral-600'}`}
                   >
-                    All Stores
+                    <T k="common.all" />
                   </Link>
                 );
               })()}
@@ -321,7 +327,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
           {/* Brands Filter */}
           <div className="space-y-2">
-            <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider">Brand</h4>
+            <h4 className="text-xs font-bold text-neutral-900 uppercase tracking-wider"><T k="search.brand" /></h4>
             <div className="flex flex-col gap-1 text-xs max-h-48 overflow-y-auto pr-1">
               {(() => {
                 const params = new URLSearchParams({ ...safeSearchParams });
@@ -331,7 +337,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                     href={`/search?${params.toString()}`}
                     className={`block py-1 px-2 rounded hover:bg-neutral-100 ${!brand ? 'font-bold text-amber-800 bg-amber-50' : 'text-neutral-600'}`}
                   >
-                    All Brands
+                    <T k="common.all" />
                   </Link>
                 );
               })()}
@@ -353,7 +359,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
           {/* Sale Filter Toggle */}
           <div className="pt-2 border-t border-neutral-100 flex items-center justify-between">
-            <span className="text-xs font-semibold text-neutral-900">Discounted / On Sale Only</span>
+            <span className="text-xs font-semibold text-neutral-900"><T k="nav.sale" /></span>
             {(() => {
               const params = new URLSearchParams({ ...safeSearchParams });
               if (sale === 'true') {
@@ -384,16 +390,16 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           {/* Sorting Bar */}
           <div className="flex items-center justify-between bg-white px-4 py-3 rounded-xl border border-neutral-200 text-xs">
             <span className="text-neutral-500 font-medium">
-              Showing <strong className="text-neutral-900">{products.length}</strong> items
+              <strong className="text-neutral-900">{products.length}</strong> <T k="search.showingProducts" />
             </span>
 
             <div className="flex items-center gap-1 sm:gap-2">
-              <span className="text-neutral-500 hidden sm:inline">Sort:</span>
+              <span className="text-neutral-500 hidden sm:inline"><T k="search.sort" />:</span>
               {[
-                { label: 'Newest', value: 'newest' },
-                { label: 'Popular', value: 'popular' },
-                { label: 'Price ↑', value: 'price_asc' },
-                { label: 'Price ↓', value: 'price_desc' },
+                { key: 'search.sortNewest' as const, value: 'newest' },
+                { key: 'search.sortPopular' as const, value: 'popular' },
+                { key: 'search.sortPriceAsc' as const, value: 'price_asc' },
+                { key: 'search.sortPriceDesc' as const, value: 'price_desc' },
               ].map((s) => {
                 const params = new URLSearchParams({ ...safeSearchParams });
                 params.set('sort', s.value);
@@ -408,7 +414,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                         : 'bg-neutral-50 text-neutral-700 border-neutral-200 hover:border-neutral-400'
                     }`}
                   >
-                    {s.label}
+                    <T k={s.key} />
                   </Link>
                 );
               })}
@@ -419,10 +425,10 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           {products.length === 0 ? (
             <div className="bg-white p-12 rounded-2xl border border-neutral-200 text-center space-y-3">
               <Filter className="w-10 h-10 text-neutral-300 mx-auto" />
-              <h3 className="text-lg font-bold text-neutral-900">No products found matching filters</h3>
-              <p className="text-xs text-neutral-500">Try adjusting your category, keyword or price filters.</p>
+              <h3 className="text-lg font-bold text-neutral-900"><T k="search.noProducts" /></h3>
+              <p className="text-xs text-neutral-500"><T k="search.noProductsDesc" /></p>
               <Link href="/search" className="inline-block text-xs bg-neutral-900 text-white font-semibold px-4 py-2 rounded-lg">
-                Reset All Filters
+                <T k="search.resetFilters" />
               </Link>
             </div>
           ) : (

@@ -21,9 +21,9 @@ import {
  * Returns localized ReplyKeyboardMarkup based on preferred language.
  */
 function getLocalizedMenu(lang?: string | null) {
-  if (lang === 'uz') {
+  if (lang === 'ru') {
     return {
-      keyboard: [[{ text: "➕ Mahsulot qo'shish" }, { text: '📦 Mening mahsulotlarim' }]],
+      keyboard: [[{ text: '➕ Добавить товар' }, { text: '📦 Мои товары' }]],
       resize_keyboard: true,
     };
   }
@@ -34,7 +34,7 @@ function getLocalizedMenu(lang?: string | null) {
     };
   }
   return {
-    keyboard: [[{ text: '➕ Добавить товар' }, { text: '📦 Мои товары' }]],
+    keyboard: [[{ text: "➕ Mahsulot qo'shish" }, { text: '📦 Mening mahsulotlarim' }]],
     resize_keyboard: true,
   };
 }
@@ -144,11 +144,11 @@ export async function POST(request: NextRequest) {
       }
 
       // Read seller's current preferred language from Supabase Auth user_metadata
-      let sellerLang = 'ru';
+      let sellerLang: 'uz' | 'ru' | 'en' = 'uz';
       try {
         const { data: authData } = await supabase.auth.admin.getUserById(user.id);
         const l = authData?.user?.user_metadata?.preferred_language;
-        if (l && ['ru', 'uz', 'en'].includes(l)) sellerLang = l;
+        if (l && ['ru', 'uz', 'en'].includes(l)) sellerLang = l as 'uz' | 'ru' | 'en';
       } catch (e) {
         console.warn('Could not read seller preferred_language:', e);
       }
@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
         const rawLang = data.replace('language_', '');
         const validLang: 'ru' | 'uz' | 'en' = ['ru', 'uz', 'en'].includes(rawLang)
           ? (rawLang as 'ru' | 'uz' | 'en')
-          : 'ru';
+          : 'uz';
 
         // Persist preferred_language in Supabase Auth user_metadata
         try {
@@ -721,8 +721,8 @@ export async function POST(request: NextRequest) {
         };
         await sendTelegramMessage(chatId, welcomeConnected[initialLang], getLocalizedMenu(initialLang));
       } else {
-        // First connection: default to 'ru' and persist it
-        const fallbackLang: 'ru' = 'ru';
+        // First connection: default to 'uz' and persist it
+        const fallbackLang: 'uz' = 'uz';
         try {
           const { error: persistErr } = await supabase.auth.admin.updateUserById(matchedUser.id, {
             user_metadata: { preferred_language: fallbackLang },
@@ -735,17 +735,17 @@ export async function POST(request: NextRequest) {
         }
 
         // a) Send welcome/menu message with ReplyKeyboardMarkup (bottom keyboard armed immediately)
-        const welcomeConnectedFirst = `✅ <b>Telegram успешно подключён!</b>\n\nВаш аккаунт связан с бутиком <b>${targetStore.name}</b>.\n\nИспользуйте меню ниже для работы с заказами и товарами.`;
+        const welcomeConnectedFirst = `✅ <b>Telegram muvaffaqiyatli ulandi!</b>\n\nSizning hisobingiz <b>${targetStore.name}</b> butigiga ulandi.\n\nBuyurtmalar va mahsulotlar bilan ishlash uchun quyidagi menyudan foydalaning.`;
         await sendTelegramMessage(chatId, welcomeConnectedFirst, getLocalizedMenu(fallbackLang));
 
         // b) Also prompt for language choice via InlineKeyboardMarkup so seller can change if desired
         await sendTelegramMessage(
           chatId,
-          `🌐 <b>Пожалуйста, выберите язык / Iltimos, tilni tanlang:</b>`,
+          `🌐 <b>Tilni tanlang / Пожалуйста, выберите язык / Choose a language:</b>`,
           {
             inline_keyboard: [[
-              { text: 'Русский', callback_data: 'language_ru' },
               { text: "O'zbekcha", callback_data: 'language_uz' },
+              { text: 'Русский', callback_data: 'language_ru' },
               { text: 'English', callback_data: 'language_en' },
             ]],
           }
@@ -816,7 +816,7 @@ export async function POST(request: NextRequest) {
       console.warn('Failed to retrieve user_metadata for seller:', user.id, langErr);
     }
 
-    const currentLangKey: 'ru' | 'uz' | 'en' = preferredLanguage || 'ru';
+    const currentLangKey: 'ru' | 'uz' | 'en' = preferredLanguage || 'uz';
 
     // 3.5 Handle /start for authenticated APPROVED seller
     if (text === '/start') {
@@ -832,8 +832,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
-      // First-time /start when language is missing: fallback to 'ru' and persist it
-      const fallbackLang: 'ru' = 'ru';
+      // First-time /start when language is missing: fallback to 'uz' and persist it
+      const fallbackLang: 'uz' = 'uz';
       try {
         const { error: persistErr } = await supabase.auth.admin.updateUserById(user.id, {
           user_metadata: { preferred_language: fallbackLang },
@@ -849,10 +849,10 @@ export async function POST(request: NextRequest) {
       await sendTelegramMessage(chatId, welcomeTexts[fallbackLang], getLocalizedMenu(fallbackLang));
 
       // b) Also show inline language picker so seller can choose another language without replacing the keyboard
-      await sendTelegramMessage(chatId, '🌐 <b>Выберите язык / Tilni tanlang / Choose a language:</b>', {
+      await sendTelegramMessage(chatId, '🌐 <b>Tilni tanlang / Выберите язык / Choose a language:</b>', {
         inline_keyboard: [[
-          { text: 'Русский', callback_data: 'language_ru' },
           { text: "O'zbekcha", callback_data: 'language_uz' },
+          { text: 'Русский', callback_data: 'language_ru' },
           { text: 'English', callback_data: 'language_en' },
         ]],
       });

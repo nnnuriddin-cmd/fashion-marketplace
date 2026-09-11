@@ -4,8 +4,10 @@ import React, { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { signInAction } from '@/app/actions/auth';
 import { LogIn, Lock, Mail, AlertCircle, KeyRound, ArrowRight } from 'lucide-react';
+import { useTranslation } from '@/lib/i18n/translations';
 
 export function LoginForm() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -39,9 +41,9 @@ export function LoginForm() {
         <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto">
           <LogIn className="w-6 h-6" />
         </div>
-        <h2 className="text-xl font-serif font-bold text-neutral-900">Sign In to TrendMall</h2>
+        <h2 className="text-xl font-serif font-bold text-neutral-900">{t('auth.signInTitle')}</h2>
         <p className="text-xs text-neutral-500">
-          Enter your email and password to access your account & orders.
+          {t('auth.signInSubtitle')}
         </p>
       </div>
 
@@ -56,14 +58,14 @@ export function LoginForm() {
         <div className="space-y-1">
           <label className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
             <Mail className="w-3.5 h-3.5 text-neutral-400" />
-            <span>Email Address</span>
+            <span>{t('auth.email')}</span>
           </label>
           <input
             type="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="e.g. anora@gmail.com"
+            placeholder="anora@gmail.com"
             className="w-full px-3.5 py-2 text-xs border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
           />
         </div>
@@ -71,7 +73,7 @@ export function LoginForm() {
         <div className="space-y-1">
           <label className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
             <Lock className="w-3.5 h-3.5 text-neutral-400" />
-            <span>Password</span>
+            <span>{t('auth.password')}</span>
           </label>
           <input
             type="password"
@@ -91,23 +93,23 @@ export function LoginForm() {
           }`}
         >
           {isPending ? (
-            <span>Signing in...</span>
+            <span>{t('auth.signingIn')}</span>
           ) : (
             <>
               <LogIn className="w-4 h-4" />
-              <span>Sign In</span>
+              <span>{t('auth.signInButton')}</span>
             </>
           )}
         </button>
       </form>
 
       <div className="text-center text-xs text-neutral-500">
-        Don&apos;t have an account?{' '}
+        {t('auth.noAccount')}{' '}
         <Link
           href="/register"
           className="font-semibold text-neutral-900 hover:underline inline-flex items-center gap-0.5"
         >
-          <span>Create account</span>
+          <span>{t('auth.registerHere')}</span>
           <ArrowRight className="w-3 h-3" />
         </Link>
       </div>
@@ -116,7 +118,7 @@ export function LoginForm() {
       <div className="pt-2 border-t border-neutral-100 space-y-2">
         <div className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
           <KeyRound className="w-3 h-3" />
-          <span>Quick Sign-In (Provisioned Accounts)</span>
+          <span>{t('auth.quickDemo')}</span>
         </div>
         <div className="grid grid-cols-3 gap-1.5 text-[10px]">
           <button

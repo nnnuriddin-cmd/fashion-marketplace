@@ -2,13 +2,34 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 
-export type Language = 'en' | 'uz';
+export type Language = 'uz' | 'ru' | 'en';
 const LanguageContext = createContext<{ language: Language; setLanguage: (language: Language) => void } | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguage] = useState<Language>('en');
-  useEffect(() => { if (localStorage.getItem('trendmall_language') === 'uz') setLanguage('uz'); }, []);
-  const changeLanguage = (next: Language) => { setLanguage(next); localStorage.setItem('trendmall_language', next); };
+  const [language, setLanguage] = useState<Language>('uz');
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('trendmall_language');
+      if (saved && (saved === 'uz' || saved === 'ru' || saved === 'en')) {
+        setLanguage(saved as Language);
+      } else {
+        localStorage.setItem('trendmall_language', 'uz');
+      }
+    } catch {
+      // localStorage may be unavailable in restricted environments
+    }
+  }, []);
+
+  const changeLanguage = (next: Language) => {
+    setLanguage(next);
+    try {
+      localStorage.setItem('trendmall_language', next);
+    } catch {
+      // silent
+    }
+  };
+
   return <LanguageContext.Provider value={{ language, setLanguage: changeLanguage }}>{children}</LanguageContext.Provider>;
 }
 

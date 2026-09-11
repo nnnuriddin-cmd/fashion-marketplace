@@ -5,6 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Heart, ShoppingBag, Store } from 'lucide-react';
 import { useCart } from '@/lib/cart-context';
+import { useTranslation } from '@/lib/i18n/translations';
 
 export interface ProductCardProps {
   product: {
@@ -30,6 +31,7 @@ export interface ProductCardProps {
 
 export default function ProductCard({ product }: ProductCardProps) {
   const { addToCart } = useCart();
+  const { t } = useTranslation();
 
   const formattedPrice = product.price.toLocaleString();
   const formattedDiscount = product.discountPrice ? product.discountPrice.toLocaleString() : null;
@@ -88,12 +90,12 @@ export default function ProductCard({ product }: ProductCardProps) {
         <div className="absolute top-2.5 left-2.5 flex flex-col gap-1 z-10">
           {product.discountPrice && (
             <span className="bg-rose-600 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded">
-              SALE
+              {t('nav.sale')}
             </span>
           )}
           {Boolean(product.isFeatured) && (
             <span className="bg-neutral-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded">
-              FEATURED
+              {t('product.featured')}
             </span>
           )}
         </div>
@@ -114,7 +116,7 @@ export default function ProductCard({ product }: ProductCardProps) {
             className="w-full bg-neutral-900/90 hover:bg-neutral-900 text-white text-xs font-semibold py-2 rounded-lg backdrop-blur-sm flex items-center justify-center gap-1.5 shadow-md"
           >
             <ShoppingBag className="w-3.5 h-3.5" />
-            <span>Quick Add</span>
+            <span>{t('product.quickAdd')}</span>
           </button>
         </div>
       </Link>

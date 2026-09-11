@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import ProductDetailClient from '@/components/customer/ProductDetailClient';
 import ProductCard from '@/components/customer/ProductCard';
 import { Store, ShieldCheck, MapPin, Star } from 'lucide-react';
+import { T } from '@/lib/i18n/translations';
 
 export const revalidate = 0;
 
@@ -188,7 +189,7 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
               </span>
               <span className="flex items-center gap-1 font-semibold text-amber-800">
                 <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                {product.storeRating || 5.0} Rating
+                {product.storeRating || 5.0} <T k="common.rating" />
               </span>
             </p>
           </div>
@@ -199,7 +200,7 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
           className="bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-semibold px-6 py-2.5 rounded-xl flex items-center gap-2 shadow-sm transition-all"
         >
           <Store className="w-4 h-4" />
-          <span>Visit Storefront →</span>
+          <span><T k="product.visitStorefront" /></span>
         </Link>
       </section>
 
@@ -207,8 +208,8 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
       {similarProducts.length > 0 && (
         <section className="space-y-6">
           <div>
-            <h2 className="text-2xl font-serif font-bold text-neutral-900">Similar Fashion Items</h2>
-            <p className="text-xs text-neutral-500">More recommendations in this category</p>
+            <h2 className="text-2xl font-serif font-bold text-neutral-900"><T k="product.similarItems" /></h2>
+            <p className="text-xs text-neutral-500"><T k="product.similarItemsDesc" /></p>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-6">

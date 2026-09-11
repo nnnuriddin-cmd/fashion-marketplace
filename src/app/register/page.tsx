@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
 import { RegisterForm } from '@/components/auth/RegisterForm';
 import { Sparkles } from 'lucide-react';
+import { T } from '@/lib/i18n/translations';
 
 export const revalidate = 0;
 
@@ -19,7 +20,7 @@ export default async function RegisterPage() {
 
       <div className="inline-flex items-center gap-2 text-xs text-neutral-400">
         <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-        <span>TrendMall Multi-Vendor Digital Fashion Marketplace</span>
+        <span><T k="nav.banner" /></span>
       </div>
     </div>
   );

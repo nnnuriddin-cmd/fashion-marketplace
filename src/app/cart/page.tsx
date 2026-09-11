@@ -5,9 +5,11 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useCart } from '@/lib/cart-context';
 import { ShoppingBag, Trash2, Store, ArrowRight, ShieldCheck, Plus, Minus } from 'lucide-react';
+import { useTranslation } from '@/lib/i18n/translations';
 
 export default function CartPage() {
   const { cart, removeFromCart, updateQuantity, getGroupedItemsByStore, getTotalAmount, clearCart } = useCart();
+  const { t } = useTranslation();
   const grouped = getGroupedItemsByStore();
   const grandTotal = getTotalAmount();
 
@@ -17,15 +19,15 @@ export default function CartPage() {
         <div className="bg-neutral-100 p-6 rounded-full w-20 h-20 mx-auto flex items-center justify-center text-neutral-400">
           <ShoppingBag className="w-10 h-10" />
         </div>
-        <h2 className="text-2xl font-serif font-bold text-neutral-900">Your Shopping Cart is Empty</h2>
+        <h2 className="text-2xl font-serif font-bold text-neutral-900">{t('cart.emptyTitle')}</h2>
         <p className="text-xs text-neutral-500 max-w-sm mx-auto">
-          Explore our marketplace to discover clothing items from top Tashkent boutiques & designer stores.
+          {t('cart.emptySubtitle')}
         </p>
         <Link
           href="/search"
           className="inline-block bg-neutral-900 hover:bg-neutral-800 text-white font-semibold text-xs px-6 py-3 rounded-full uppercase tracking-wider transition-all"
         >
-          Start Shopping →
+          {t('cart.startShopping')}
         </Link>
       </div>
     );
@@ -35,15 +37,15 @@ export default function CartPage() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
       <div className="flex items-center justify-between border-b border-neutral-200 pb-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-serif font-bold text-neutral-900">Multi-Vendor Cart</h1>
-          <p className="text-xs text-neutral-500">Items are grouped by store for fulfillment</p>
+          <h1 className="text-2xl sm:text-3xl font-serif font-bold text-neutral-900">{t('cart.title')}</h1>
+          <p className="text-xs text-neutral-500">{t('cart.subtitle')}</p>
         </div>
 
         <button
           onClick={clearCart}
           className="text-xs text-rose-600 hover:underline font-semibold"
         >
-          Clear Cart
+          {t('cart.clear')}
         </button>
       </div>
 
@@ -60,7 +62,7 @@ export default function CartPage() {
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                 </Link>
                 <span className="text-xs text-neutral-300 font-semibold">
-                  Subtotal: {group.subtotal.toLocaleString()} UZS
+                  {t('cart.subtotal')}: {group.subtotal.toLocaleString()} {t('common.uzs')}
                 </span>
               </div>
 
@@ -78,11 +80,11 @@ export default function CartPage() {
                           {item.name}
                         </Link>
                         <div className="text-xs text-neutral-500 space-x-3">
-                          <span>Size: <strong>{item.selectedSize}</strong></span>
-                          <span>Color: <strong>{item.selectedColor}</strong></span>
+                          <span>{t('cart.size')} <strong>{item.selectedSize}</strong></span>
+                          <span>{t('cart.color')} <strong>{item.selectedColor}</strong></span>
                         </div>
                         <div className="text-xs font-bold text-neutral-900">
-                          {item.price.toLocaleString()} UZS
+                          {item.price.toLocaleString()} {t('common.uzs')}
                         </div>
                       </div>
                     </div>
@@ -106,7 +108,7 @@ export default function CartPage() {
                       </div>
 
                       <span className="text-sm font-bold text-neutral-900 sm:w-28 text-right">
-                        {(item.price * item.quantity).toLocaleString()} UZS
+                        {(item.price * item.quantity).toLocaleString()} {t('common.uzs')}
                       </span>
 
                       <button
@@ -128,40 +130,40 @@ export default function CartPage() {
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm space-y-4 sticky top-20">
             <h3 className="text-lg font-serif font-bold text-neutral-900 border-b border-neutral-100 pb-3">
-              Order Summary
+              {t('cart.summaryTitle')}
             </h3>
 
             <div className="space-y-2 text-xs text-neutral-600">
               <div className="flex justify-between">
-                <span>Stores in Cart:</span>
-                <span className="font-semibold text-neutral-900">{Object.keys(grouped).length} Stores</span>
+                <span>{t('nav.stores')}:</span>
+                <span className="font-semibold text-neutral-900">{Object.keys(grouped).length}</span>
               </div>
               <div className="flex justify-between">
-                <span>Items Subtotal:</span>
-                <span className="font-semibold text-neutral-900">{grandTotal.toLocaleString()} UZS</span>
+                <span>{t('cart.subtotal')}:</span>
+                <span className="font-semibold text-neutral-900">{grandTotal.toLocaleString()} {t('common.uzs')}</span>
               </div>
               <div className="flex justify-between">
-                <span>Estimated Delivery:</span>
-                <span className="font-semibold text-emerald-700">Free Local Express</span>
+                <span>{t('cart.delivery')}:</span>
+                <span className="font-semibold text-emerald-700">{t('cart.deliveryFree')}</span>
               </div>
             </div>
 
             <hr className="border-neutral-100" />
 
             <div className="flex justify-between items-baseline">
-              <span className="text-sm font-bold text-neutral-900">Total Amount:</span>
-              <span className="text-xl font-bold text-neutral-900">{grandTotal.toLocaleString()} UZS</span>
+              <span className="text-sm font-bold text-neutral-900">{t('cart.grandTotal')}:</span>
+              <span className="text-xl font-bold text-neutral-900">{grandTotal.toLocaleString()} {t('common.uzs')}</span>
             </div>
 
             <Link
               href="/checkout"
               className="block text-center w-full bg-neutral-900 hover:bg-neutral-800 text-white font-bold py-3.5 rounded-xl uppercase text-xs tracking-wider transition-all shadow-md"
             >
-              Proceed to Checkout →
+              {t('cart.proceedCheckout')} →
             </Link>
 
             <p className="text-[11px] text-neutral-400 text-center">
-              Single checkout will generate isolated store sub-orders automatically.
+              {t('cart.guaranteeDesc')}
             </p>
           </div>
         </div>

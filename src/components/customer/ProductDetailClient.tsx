@@ -5,9 +5,11 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useCart } from '@/lib/cart-context';
 import { ShoppingBag, Heart, Store, Truck, ShieldCheck, Check, Sparkles, Share2 } from 'lucide-react';
+import { useTranslation } from '@/lib/i18n/translations';
 
 export default function ProductDetailClient({ product }: { product: any }) {
   const { addToCart } = useCart();
+  const { t } = useTranslation();
 
   let images: string[] = [product.originalImage];
   if (product.processedImages) {
@@ -82,11 +84,11 @@ export default function ProductDetailClient({ product }: { product: any }) {
           <div className="absolute top-4 left-4 flex flex-col gap-1.5 z-10">
             {product.discountPrice && (
               <span className="bg-rose-600 text-white text-xs font-bold px-2.5 py-1 rounded">
-                SAVE {(product.price - product.discountPrice).toLocaleString()} UZS
+                {t('common.saveAmount')} {(product.price - product.discountPrice).toLocaleString()} {t('common.uzs')}
               </span>
             )}
             <span className="bg-neutral-900/90 backdrop-blur-sm text-white text-xs font-semibold px-2.5 py-1 rounded flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Studio Processed
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" /> {t('product.studioProcessed')}
             </span>
           </div>
         </div>
@@ -148,7 +150,7 @@ export default function ProductDetailClient({ product }: { product: any }) {
           <div className="flex items-center gap-2 text-xs">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
             <span className="text-emerald-700 font-semibold">
-              In Stock ({product.stockQuantity || 10} items left in store)
+              {t('product.inStock')} ({product.stockQuantity || 10})
             </span>
           </div>
 
@@ -157,8 +159,8 @@ export default function ProductDetailClient({ product }: { product: any }) {
           {/* Size Selector */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-neutral-900 uppercase tracking-wider">Select Size:</span>
-              <span className="text-neutral-500 font-medium">Selected: <strong>{selectedSize}</strong></span>
+              <span className="font-bold text-neutral-900 uppercase tracking-wider">{t('product.selectSize')}</span>
+              <span className="text-neutral-500 font-medium">{selectedSize}</span>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -182,7 +184,7 @@ export default function ProductDetailClient({ product }: { product: any }) {
           {colors.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-neutral-900 uppercase tracking-wider">Select Color:</span>
+                <span className="font-bold text-neutral-900 uppercase tracking-wider">{t('product.selectColor')}</span>
                 <span className="text-neutral-500 font-medium">{selectedColor}</span>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -205,7 +207,7 @@ export default function ProductDetailClient({ product }: { product: any }) {
 
           {/* Quantity Selector */}
           <div className="space-y-2">
-            <span className="text-xs font-bold text-neutral-900 uppercase tracking-wider">Quantity:</span>
+            <span className="text-xs font-bold text-neutral-900 uppercase tracking-wider">{t('product.quantity')}</span>
             <div className="flex items-center gap-3">
               <div className="flex items-center border border-neutral-200 rounded-xl bg-neutral-50">
                 <button
@@ -231,7 +233,7 @@ export default function ProductDetailClient({ product }: { product: any }) {
           {addedAlert && (
             <div className="bg-emerald-50 text-emerald-800 border border-emerald-200 p-2.5 rounded-xl text-xs font-semibold flex items-center gap-2">
               <Check className="w-4 h-4 text-emerald-600" />
-              <span>Added to multi-vendor shopping cart!</span>
+              <span>{t('product.addedToCartAlert')}</span>
             </div>
           )}
 
@@ -241,21 +243,21 @@ export default function ProductDetailClient({ product }: { product: any }) {
               className="flex-1 bg-neutral-900 hover:bg-neutral-800 text-white font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 text-xs uppercase tracking-wider transition-all shadow-md"
             >
               <ShoppingBag className="w-4 h-4" />
-              <span>Add to Cart</span>
+              <span>{t('product.addToCart')}</span>
             </button>
 
             <button
               onClick={handleBuyNow}
               className="flex-1 bg-amber-800 hover:bg-amber-700 text-white font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 text-xs uppercase tracking-wider transition-all shadow-md"
             >
-              <span>Buy Now</span>
+              <span>{t('product.buyNow')}</span>
             </button>
           </div>
         </div>
 
         {/* Product Meta Details */}
         <div className="bg-neutral-50 p-4 rounded-2xl text-xs space-y-2 border border-neutral-200/80">
-          <h4 className="font-bold text-neutral-900">Product Specifications</h4>
+          <h4 className="font-bold text-neutral-900">{t('product.specifications')}</h4>
           <p className="text-neutral-600 leading-relaxed">{product.description}</p>
           <div className="grid grid-cols-2 gap-2 pt-2 text-[11px] text-neutral-600">
             {product.material && <div><strong>Material:</strong> {product.material}</div>}

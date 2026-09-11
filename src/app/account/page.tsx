@@ -7,6 +7,7 @@ import { Package, Store, AlertCircle, Sparkles, ShieldCheck } from 'lucide-react
 import { LoginForm } from '@/components/auth/LoginForm';
 import { SignOutButton } from '@/components/auth/SignOutButton';
 import { TelegramConnectCard } from '@/components/account/TelegramConnectCard';
+import { T } from '@/lib/i18n/translations';
 
 export const revalidate = 0;
 
@@ -22,7 +23,7 @@ export default async function CustomerAccountPage() {
 
         <div className="inline-flex items-center gap-2 text-xs text-neutral-400">
           <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-          <span>TrendMall Multi-Vendor Digital Fashion Marketplace</span>
+          <span><T k="nav.banner" /></span>
         </div>
       </div>
     );
@@ -63,15 +64,15 @@ export default async function CustomerAccountPage() {
         <div className="bg-rose-100 text-rose-800 p-4 rounded-full w-16 h-16 mx-auto flex items-center justify-center">
           <AlertCircle className="w-8 h-8" />
         </div>
-        <h1 className="text-2xl font-serif font-bold text-neutral-900">Database Connection Error</h1>
+        <h1 className="text-2xl font-serif font-bold text-neutral-900"><T k="account.dbError" /></h1>
         <p className="text-sm text-neutral-600 max-w-md mx-auto">
-          Unable to fetch your account and order history from Supabase. Details: {loadError}
+          <T k="account.dbErrorDesc" /> {loadError}
         </p>
         <Link
           href="/"
           className="inline-block bg-neutral-900 text-white text-xs font-semibold px-6 py-3 rounded-xl hover:bg-neutral-800"
         >
-          Return to Marketplace
+          <T k="account.returnHome" />
         </Link>
       </div>
     );
@@ -101,7 +102,7 @@ export default async function CustomerAccountPage() {
               {user?.phone && <span>• {user.phone}</span>}
               <span className="text-[11px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 flex items-center gap-1">
                 <ShieldCheck className="w-3 h-3" />
-                <span>Verified Auth Session</span>
+                <span><T k="account.verifiedSession" /></span>
               </span>
             </p>
             <p className="text-[10px] font-mono text-neutral-400">
@@ -112,7 +113,7 @@ export default async function CustomerAccountPage() {
 
         <div className="flex items-center gap-3 self-end sm:self-center">
           <div className="bg-neutral-50 px-4 py-2 rounded-xl text-xs text-neutral-600 border border-neutral-200">
-            Orders: <strong>{orders.length}</strong>
+            <T k="account.ordersCount" /> <strong>{orders.length}</strong>
           </div>
           <SignOutButton />
         </div>
@@ -132,20 +133,20 @@ export default async function CustomerAccountPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-serif font-bold text-neutral-900 flex items-center gap-2">
             <Package className="w-5 h-5 text-amber-800" />
-            <span>Order History & Tracking</span>
+            <span><T k="account.orderHistory" /></span>
           </h2>
         </div>
 
         {orders.length === 0 ? (
           <div className="bg-white p-12 rounded-2xl border border-neutral-200 text-center space-y-3">
             <Package className="w-10 h-10 text-neutral-300 mx-auto" />
-            <h3 className="text-base font-bold text-neutral-900">No orders placed yet</h3>
-            <p className="text-xs text-neutral-500">Explore marketplace products to place your first order.</p>
+            <h3 className="text-base font-bold text-neutral-900"><T k="account.noOrders" /></h3>
+            <p className="text-xs text-neutral-500"><T k="account.noOrdersDesc" /></p>
             <Link
               href="/search"
               className="inline-block text-xs bg-neutral-900 text-white font-semibold px-4 py-2 rounded-lg"
             >
-              Browse Catalog
+              <T k="account.browseCatalog" />
             </Link>
           </div>
         ) : (
@@ -159,10 +160,10 @@ export default async function CustomerAccountPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-neutral-100 pb-4">
                   <div>
                     <div className="text-sm font-bold text-neutral-900 font-mono">
-                      Parent Order #{order.order_number}
+                      <T k="account.parentOrder" /> #{order.order_number}
                     </div>
                     <div className="text-xs text-neutral-500">
-                      Placed on{' '}
+                      <T k="account.placedOn" />{' '}
                       {new Date(order.created_at).toLocaleDateString('en-US', {
                         month: 'short',
                         day: 'numeric',
@@ -183,83 +184,102 @@ export default async function CustomerAccountPage() {
 
                 {/* Seller Sub-Orders Cards */}
                 <div className="space-y-4">
-                  {order.seller_orders.map((so) => (
-                    <div
-                      key={so.id}
-                      className="bg-neutral-50 p-4 rounded-xl border border-neutral-200/80 space-y-3"
-                    >
-                      <div className="flex items-center justify-between text-xs">
-                        <Link
-                          href={`/store/${so.store_slug || ''}`}
-                          className="font-bold text-neutral-900 hover:text-amber-800 flex items-center gap-1.5"
-                        >
-                          <Store className="w-4 h-4 text-amber-700" />
-                          <span>{so.store_name || 'Vendor Boutique'}</span>
-                          <span className="font-mono text-neutral-400 font-normal">
-                            ({so.sub_order_number})
-                          </span>
-                        </Link>
+                  {order.seller_orders.map((so) => {
+                    const statusKey =
+                      so.status === 'CONFIRMED'
+                        ? 'account.orderConfirmed'
+                        : so.status === 'PREPARING'
+                        ? 'account.orderPreparing'
+                        : so.status === 'OUT_FOR_DELIVERY'
+                        ? 'account.orderDelivery'
+                        : so.status === 'DELIVERED'
+                        ? 'account.orderDelivered'
+                        : so.status === 'CANCELLED'
+                        ? 'account.orderCancelled'
+                        : so.status === 'NEW'
+                        ? 'account.orderNew'
+                        : null;
 
-                        {/* Status Badge */}
-                        <span
-                          className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase ${
-                            so.status === 'CONFIRMED'
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : so.status === 'PREPARING'
-                              ? 'bg-amber-100 text-amber-800'
-                              : so.status === 'OUT_FOR_DELIVERY'
-                              ? 'bg-sky-100 text-sky-800'
-                              : so.status === 'DELIVERED'
-                              ? 'bg-emerald-600 text-white'
-                              : so.status === 'CANCELLED'
-                              ? 'bg-rose-100 text-rose-800'
-                              : 'bg-neutral-200 text-neutral-800'
-                          }`}
-                        >
-                          {so.status}
-                        </span>
-                      </div>
-
-                      {/* Items */}
-                      <div className="divide-y divide-neutral-200/60 pt-1">
-                        {so.items.map((item) => (
-                          <div
-                            key={item.id}
-                            className="py-2 first:pt-0 last:pb-0 flex items-center justify-between text-xs"
+                    return (
+                      <div
+                        key={so.id}
+                        className="bg-neutral-50 p-4 rounded-xl border border-neutral-200/80 space-y-3"
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <Link
+                            href={`/store/${so.store_slug || ''}`}
+                            className="font-bold text-neutral-900 hover:text-amber-800 flex items-center gap-1.5"
                           >
-                            <div className="flex items-center gap-3">
-                              <div className="relative w-12 h-12 bg-white rounded-lg border border-neutral-200 overflow-hidden shrink-0">
-                                {item.product_image ? (
-                                  <Image
-                                    src={item.product_image}
-                                    alt={item.product_name}
-                                    fill
-                                    className="object-contain p-0.5"
-                                    unoptimized
-                                  />
-                                ) : (
-                                  <div className="w-full h-full bg-neutral-100 flex items-center justify-center text-[10px] text-neutral-400">
-                                    No Image
+                            <Store className="w-4 h-4 text-amber-700" />
+                            <span>{so.store_name || 'Vendor Boutique'}</span>
+                            <span className="font-mono text-neutral-400 font-normal">
+                              ({so.sub_order_number})
+                            </span>
+                          </Link>
+
+                          {/* Status Badge */}
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase ${
+                              so.status === 'CONFIRMED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : so.status === 'PREPARING'
+                                ? 'bg-amber-100 text-amber-800'
+                                : so.status === 'OUT_FOR_DELIVERY'
+                                ? 'bg-sky-100 text-sky-800'
+                                : so.status === 'DELIVERED'
+                                ? 'bg-emerald-600 text-white'
+                                : so.status === 'CANCELLED'
+                                ? 'bg-rose-100 text-rose-800'
+                                : 'bg-neutral-200 text-neutral-800'
+                            }`}
+                          >
+                            {statusKey ? <T k={statusKey} /> : so.status}
+                          </span>
+                        </div>
+
+                        {/* Items */}
+                        <div className="divide-y divide-neutral-200/60 pt-1">
+                          {so.items.map((item) => (
+                            <div
+                              key={item.id}
+                              className="py-2 first:pt-0 last:pb-0 flex items-center justify-between text-xs"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="relative w-12 h-12 bg-white rounded-lg border border-neutral-200 overflow-hidden shrink-0">
+                                  {item.product_image ? (
+                                    <Image
+                                      src={item.product_image}
+                                      alt={item.product_name}
+                                      fill
+                                      className="object-contain p-0.5"
+                                      unoptimized
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full bg-neutral-100 flex items-center justify-center text-[10px] text-neutral-400">
+                                      No Image
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="font-semibold text-neutral-900">{item.product_name}</div>
+                                  <div className="text-[11px] text-neutral-500">
+                                    <T k="cart.size" /> {item.selected_size || 'N/A'}{' '}
+                                    {item.selected_color ? (
+                                      <>| <T k="cart.color" /> {item.selected_color} </>
+                                    ) : null}
+                                    | <T k="product.quantity" />: {item.quantity}
                                   </div>
-                                )}
-                              </div>
-                              <div>
-                                <div className="font-semibold text-neutral-900">{item.product_name}</div>
-                                <div className="text-[11px] text-neutral-500">
-                                  Size: {item.selected_size || 'N/A'}{' '}
-                                  {item.selected_color ? `| Color: ${item.selected_color}` : ''} | Qty:{' '}
-                                  {item.quantity}
                                 </div>
                               </div>
+                              <div className="font-bold text-neutral-900">
+                                {Number(item.subtotal).toLocaleString()} UZS
+                              </div>
                             </div>
-                            <div className="font-bold text-neutral-900">
-                              {Number(item.subtotal).toLocaleString()} UZS
-                            </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}

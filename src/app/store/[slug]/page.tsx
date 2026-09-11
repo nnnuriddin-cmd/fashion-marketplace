@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import ProductCard from '@/components/customer/ProductCard';
 import { MapPin, Phone, Send, Star, ShieldCheck, ShoppingBag, Store as StoreIcon } from 'lucide-react';
+import { T } from '@/lib/i18n/translations';
 
 export const revalidate = 0;
 
@@ -201,16 +202,16 @@ export default async function StoreFrontpage({ params, searchParams }: StorePage
 
                 <span className="flex items-center gap-1 font-bold text-amber-800">
                   <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                  {store.rating || 5.0} Rating
+                  {store.rating || 5.0} <T k="common.rating" />
                 </span>
               </div>
             </div>
           </div>
 
           <div className="flex flex-col gap-2 shrink-0 border-t md:border-t-0 md:border-l border-neutral-100 pt-4 md:pt-0 md:pl-6 text-xs text-neutral-500">
-            <div><strong>Active Items:</strong> {products.length} published</div>
-            <div><strong>Store Status:</strong> <span className="text-emerald-700 font-semibold">APPROVED</span></div>
-            <div><strong>Fast Delivery:</strong> Same Day in Tashkent</div>
+            <div><strong><T k="stores.activeItems" /></strong> {products.length} <T k="stores.published" /></div>
+            <div><strong><T k="stores.status" /></strong> <span className="text-emerald-700 font-semibold"><T k="stores.statusApproved" /></span></div>
+            <div><strong><T k="stores.fastDelivery" /></strong> <T k="stores.sameDay" /></div>
           </div>
         </div>
       </div>
@@ -219,8 +220,8 @@ export default async function StoreFrontpage({ params, searchParams }: StorePage
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-200 pb-4">
           <div>
-            <h2 className="text-xl font-serif font-bold text-neutral-900">{store.name} Catalog</h2>
-            <p className="text-xs text-neutral-500">Browse clothing items directly from this boutique</p>
+            <h2 className="text-xl font-serif font-bold text-neutral-900">{store.name} <T k="stores.catalogTitle" /></h2>
+            <p className="text-xs text-neutral-500"><T k="stores.catalogSubtitle" /></p>
           </div>
 
           {/* Store Category Chips */}
@@ -231,7 +232,7 @@ export default async function StoreFrontpage({ params, searchParams }: StorePage
                 !safeSearchParams.category ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
               }`}
             >
-              All Items ({rawStoreProducts.length})
+              <T k="stores.allItems" /> ({rawStoreProducts.length})
             </Link>
             {storeCategories.map((cat: any) => (
               <Link
@@ -253,8 +254,8 @@ export default async function StoreFrontpage({ params, searchParams }: StorePage
         {products.length === 0 ? (
           <div className="bg-white p-12 rounded-2xl border border-neutral-200 text-center space-y-2">
             <ShoppingBag className="w-10 h-10 text-neutral-300 mx-auto" />
-            <h3 className="text-base font-bold text-neutral-900">No items found in this store category</h3>
-            <p className="text-xs text-neutral-500">Check back soon for new arrivals from {store.name}.</p>
+            <h3 className="text-base font-bold text-neutral-900"><T k="stores.noItemsCategory" /></h3>
+            <p className="text-xs text-neutral-500"><T k="stores.checkBackSoon" /></p>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 sm:gap-6">
