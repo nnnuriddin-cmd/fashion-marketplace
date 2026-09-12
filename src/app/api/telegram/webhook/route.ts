@@ -15,6 +15,7 @@ import {
   matchBrand,
   formatProductPreview,
   formatAiExtractionDetails,
+  getTelegramText,
 } from '@/lib/telegram/product-draft';
 
 /**
@@ -56,7 +57,8 @@ function buildPriceStepPromptAndKeyboard(
   ai: any,
   categoryName: string,
   brandName: string | null,
-  sessionId: string
+  sessionId: string,
+  lang: 'uz' | 'ru' | 'en' = 'uz'
 ) {
   const suggestedPrice = ai?.suggestedPrice;
   const hasValidSuggestedPrice =
@@ -67,9 +69,10 @@ function buildPriceStepPromptAndKeyboard(
   const rawDetails = formatAiExtractionDetails(
     { ...ai, suggestedPrice: undefined },
     categoryName,
-    brandName
+    brandName,
+    lang
   );
-  const stepHeader = '💰 <b>Step 1/2 — Set Product Price</b>';
+  const stepHeader = getTelegramText(lang, 'step1_header');
   const baseCard = rawDetails.includes(stepHeader)
     ? rawDetails.split(stepHeader)[0] + stepHeader
     : rawDetails;
@@ -77,18 +80,21 @@ function buildPriceStepPromptAndKeyboard(
   let promptText = '';
   let keyboard: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
 
+  const cancelLabel = getTelegramText(lang, 'btn_cancel');
+
   if (hasValidSuggestedPrice) {
-    promptText = `${baseCard}\n\n💡 Suggested price: ${suggestedPrice.toLocaleString()} UZS\nTap below to use it, or type your own price in UZS:`;
+    const formattedPrice = suggestedPrice.toLocaleString();
+    promptText = `${baseCard}\n\n${getTelegramText(lang, 'suggested_price_prompt', { price: formattedPrice })}`;
     keyboard = {
       inline_keyboard: [
-        [{ text: `✅ Use ${suggestedPrice.toLocaleString()} UZS`, callback_data: `set_price_${suggestedPrice}` }],
-        [{ text: '❌ Cancel', callback_data: `cancel_${sessionId}` }],
+        [{ text: getTelegramText(lang, 'btn_use_price', { price: formattedPrice }), callback_data: `set_price_${suggestedPrice}` }],
+        [{ text: cancelLabel, callback_data: `cancel_${sessionId}` }],
       ],
     };
   } else {
-    promptText = `${baseCard}\n\n✍️ Please enter the price in UZS (minimum 1,000 UZS):\nExample: 150000`;
+    promptText = `${baseCard}\n\n${getTelegramText(lang, 'enter_price_prompt')}`;
     keyboard = {
-      inline_keyboard: [[{ text: '❌ Cancel', callback_data: `cancel_${sessionId}` }]],
+      inline_keyboard: [[{ text: cancelLabel, callback_data: `cancel_${sessionId}` }]],
     };
   }
 
@@ -208,7 +214,7 @@ export async function POST(request: NextRequest) {
 
       // 2.2 Cancel Draft Callback (e.g. cancel_<sessionId> or cancel_draft)
       if (data.startsWith('cancel_')) {
-        await answerTelegramCallbackQuery(cbId, 'Draft cancelled');
+        await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_draft_cancelled'));
 
         if (cb.message?.message_id) {
           await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
@@ -237,13 +243,13 @@ export async function POST(request: NextRequest) {
       // 2.3 Set Suggested Price Callback (set_price_<price>)
       if (data.startsWith('set_price_')) {
         const priceStr = data.replace('set_price_', '');
-        const priceRes = validatePriceInput(priceStr);
+        const priceRes = validatePriceInput(priceStr, sellerLang);
 
         if (!priceRes.valid || !priceRes.price || priceRes.price < 1000) {
           if (cb.message?.message_id) {
             await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
           }
-          await answerTelegramCallbackQuery(cbId, 'Invalid price (min 1,000 UZS)', true);
+          await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_invalid_price'), true);
           return NextResponse.json({ ok: true });
         }
 
@@ -257,11 +263,11 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
 
         if (!session) {
-          await answerTelegramCallbackQuery(cbId, 'No active draft session', true);
+          await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_no_draft'), true);
           return NextResponse.json({ ok: true });
         }
 
-        await answerTelegramCallbackQuery(cbId, `Price set: ${priceRes.price.toLocaleString()} UZS`);
+        await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_price_set', { price: priceRes.price.toLocaleString() }));
 
         if (cb.message?.message_id) {
           await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
@@ -279,17 +285,17 @@ export async function POST(request: NextRequest) {
 
         await sendTelegramMessage(
           chatId,
-          `✅ <b>Price Confirmed:</b> <b>${priceRes.price.toLocaleString()} UZS</b>\n\n` +
-          `📦 <b>Step 2/2 — Set Available Stock</b>\n` +
-          `Please enter the inventory quantity (whole number ≥ 1, e.g. <code>10</code>) or select a quick option below:`,
+          `${getTelegramText(sellerLang, 'price_confirmed', { price: priceRes.price.toLocaleString() })}\n\n` +
+          `${getTelegramText(sellerLang, 'step2_header')}\n` +
+          getTelegramText(sellerLang, 'enter_stock_prompt'),
           {
             inline_keyboard: [
               [
-                { text: '1 pc', callback_data: 'set_stock_1' },
-                { text: '5 pcs', callback_data: 'set_stock_5' },
-                { text: '10 pcs', callback_data: 'set_stock_10' },
+                { text: getTelegramText(sellerLang, 'btn_stock_1'), callback_data: 'set_stock_1' },
+                { text: getTelegramText(sellerLang, 'btn_stock_5'), callback_data: 'set_stock_5' },
+                { text: getTelegramText(sellerLang, 'btn_stock_10'), callback_data: 'set_stock_10' },
               ],
-              [{ text: '❌ Cancel', callback_data: `cancel_${session.id}` }],
+              [{ text: getTelegramText(sellerLang, 'btn_cancel'), callback_data: `cancel_${session.id}` }],
             ],
           }
         );
@@ -299,10 +305,10 @@ export async function POST(request: NextRequest) {
       // 2.4 Set Quick Stock Callback (set_stock_<stock>)
       if (data.startsWith('set_stock_')) {
         const stockStr = data.replace('set_stock_', '');
-        const stockRes = validateStockInput(stockStr);
+        const stockRes = validateStockInput(stockStr, sellerLang);
 
         if (!stockRes.valid || !stockRes.stock) {
-          await answerTelegramCallbackQuery(cbId, 'Invalid stock quantity', true);
+          await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_invalid_stock'), true);
           return NextResponse.json({ ok: true });
         }
 
@@ -316,12 +322,12 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
 
         if (!session || !session.draft?.price) {
-          await answerTelegramCallbackQuery(cbId, 'Please enter product price first', true);
+          await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_enter_price_first'), true);
           return NextResponse.json({ ok: true });
         }
 
         // 1. Acknowledge callback promptly
-        await answerTelegramCallbackQuery(cbId, `Stock set: ${stockRes.stock} pcs`);
+        await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_stock_set', { stock: stockRes.stock }));
 
         // 2. Clear old stock keyboard
         if (cb.message?.message_id) {
@@ -354,12 +360,12 @@ export async function POST(request: NextRequest) {
           price: session.draft.price,
           stock: stockRes.stock,
           tags: ai.tags || [],
-        });
+        }, sellerLang);
 
         await sendTelegramMessage(chatId, previewText, {
           inline_keyboard: [
-            [{ text: '🚀 Publish Product', callback_data: `publish_${session.id}` }],
-            [{ text: '❌ Cancel', callback_data: `cancel_${session.id}` }],
+            [{ text: getTelegramText(sellerLang, 'btn_publish'), callback_data: `publish_${session.id}` }],
+            [{ text: getTelegramText(sellerLang, 'btn_cancel'), callback_data: `cancel_${session.id}` }],
           ],
         });
         return NextResponse.json({ ok: true });
@@ -375,7 +381,7 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
 
         if (!cat) {
-          await answerTelegramCallbackQuery(cbId, 'Category not found', true);
+          await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_category_not_found'), true);
           return NextResponse.json({ ok: true });
         }
 
@@ -389,11 +395,11 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
 
         if (!session) {
-          await answerTelegramCallbackQuery(cbId, 'Session expired', true);
+          await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_session_expired'), true);
           return NextResponse.json({ ok: true });
         }
 
-        await answerTelegramCallbackQuery(cbId, `Category: ${cat.name}`);
+        await answerTelegramCallbackQuery(cbId, `📁 ${cat.name}`);
 
         if (cb.message?.message_id) {
           await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
@@ -419,7 +425,8 @@ export async function POST(request: NextRequest) {
           ai,
           cat.name,
           session.draft?.brand_name || null,
-          session.id
+          session.id,
+          sellerLang
         );
 
         await sendTelegramMessage(chatId, promptText, keyboard);
@@ -454,21 +461,21 @@ export async function POST(request: NextRequest) {
             .maybeSingle();
 
           if (existingProd) {
-            await answerTelegramCallbackQuery(cbId, 'Already published!', true);
+            await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_already_published'), true);
             await sendTelegramMessage(
               chatId,
-              `✅ <b>${existingProd.title}</b> is already live on TrendMall!`,
+              getTelegramText(sellerLang, 'msg_already_published', { title: existingProd.title }),
               getLocalizedMenu(sellerLang)
             );
             return NextResponse.json({ ok: true });
           }
 
-          await answerTelegramCallbackQuery(cbId, 'Draft session expired or already processed', true);
+          await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_session_expired'), true);
           return NextResponse.json({ ok: true });
         }
 
         // Acknowledge callback promptly so the Telegram client stops spinning
-        await answerTelegramCallbackQuery(cbId, 'Publishing product live...');
+        await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_publishing'));
 
         // Clear the original inline keyboard so Publish cannot be repeatedly tapped
         if (cb.message?.message_id) {
@@ -490,10 +497,10 @@ export async function POST(request: NextRequest) {
             .update({ step: 'AWAITING_PUBLICATION_CONFIRMATION' })
             .eq('id', sessionId);
 
-          await answerTelegramCallbackQuery(cbId, 'Missing required product information');
+          await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'msg_incomplete_draft'), true);
           await sendTelegramMessage(
             chatId,
-            '⚠️ <b>Incomplete Draft</b>\n\nSome required product details are missing. Please enter price and stock before publishing.'
+            getTelegramText(sellerLang, 'msg_incomplete_draft')
           );
           return NextResponse.json({ ok: true });
         }
@@ -502,7 +509,7 @@ export async function POST(request: NextRequest) {
         if (imageUrl.includes('api.telegram.org') || imageUrl.includes('/bot')) {
           console.error('CRITICAL SECURITY: Refusing product publication with Telegram Bot API URL');
           await supabase.from('telegram_sessions').delete().eq('id', sessionId);
-          await answerTelegramCallbackQuery(cbId, 'Image security error');
+          await answerTelegramCallbackQuery(cbId, 'Image security error', true);
           await sendTelegramMessage(chatId, '❌ Security error: Invalid image source. Please upload the photo again.');
           return NextResponse.json({ ok: true });
         }
@@ -557,17 +564,17 @@ export async function POST(request: NextRequest) {
             .update({ step: 'AWAITING_PUBLICATION_CONFIRMATION' })
             .eq('id', sessionId);
 
-          await answerTelegramCallbackQuery(cbId, 'Database error while publishing');
+          await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'msg_publish_db_error'), true);
           await sendTelegramMessage(
             chatId,
-            '⚠️ <b>Publication Failed</b>\n\nA database error occurred while creating your product. Please tap <b>🚀 Publish Product</b> to retry, or /cancel.'
+            getTelegramText(sellerLang, 'msg_publish_db_error')
           );
           return NextResponse.json({ ok: true });
         }
 
         // Product created successfully! Clean up session
         await supabase.from('telegram_sessions').delete().eq('id', sessionId);
-        await answerTelegramCallbackQuery(cbId, '🎉 Product published live!');
+        await answerTelegramCallbackQuery(cbId, getTelegramText(sellerLang, 'alert_published_live'));
 
         const publishSuccessMsgs: Record<string, string> = {
           ru: `🎉 <b>Товар успешно опубликован!</b>\n\n` +
@@ -950,7 +957,7 @@ export async function POST(request: NextRequest) {
 
       const promptText = addProductPrompts[currentLangKey];
       await sendTelegramMessage(chatId, promptText, {
-        inline_keyboard: [[{ text: '❌ Cancel', callback_data: `cancel_${freshSessionId}` }]],
+        inline_keyboard: [[{ text: getTelegramText(currentLangKey, 'btn_cancel'), callback_data: `cancel_${freshSessionId}` }]],
       });
       return NextResponse.json({ ok: true });
     }
@@ -1030,7 +1037,7 @@ export async function POST(request: NextRequest) {
         console.warn('Telegram getFile returned error for file_id:', file.file_id);
         await sendTelegramMessage(
           chatId,
-          '⚠️ <b>Could not retrieve photo from Telegram</b>. Please try sending the photo again.'
+          getTelegramText(currentLangKey, 'msg_photo_get_error')
         );
         return NextResponse.json({ ok: true });
       }
@@ -1040,7 +1047,7 @@ export async function POST(request: NextRequest) {
       const imgRes = await fetch(downloadUrl);
       if (!imgRes.ok) {
         console.warn('Failed to download image bytes from Telegram API for file_id:', file.file_id);
-        await sendTelegramMessage(chatId, '⚠️ <b>Failed to download photo</b>. Please try sending it again.');
+        await sendTelegramMessage(chatId, getTelegramText(currentLangKey, 'msg_photo_download_error'));
         return NextResponse.json({ ok: true });
       }
 
@@ -1058,9 +1065,14 @@ export async function POST(request: NextRequest) {
         });
       } catch (procErr: any) {
         console.warn('Product image processing failed for store:', store.id, procErr?.message || procErr);
+        const fallbackHelp = currentLangKey === 'uz'
+          ? "Iltimos, hajmi 15MB dan kam bo'lgan aniq rasm (JPEG, PNG yoki WebP) yuboring."
+          : currentLangKey === 'ru'
+          ? 'Пожалуйста, отправьте четкое фото (JPEG, PNG или WebP) размером менее 15 МБ.'
+          : 'Please send a clear photo (JPEG, PNG, or WebP) under 15MB.';
         await sendTelegramMessage(
           chatId,
-          `❌ <b>Image processing failed</b>\n\n${procErr?.message || 'Please send a clear photo (JPEG, PNG, or WebP) under 15MB.'}`
+          `${getTelegramText(currentLangKey, 'msg_image_processing_failed')}\n\n${procErr?.message || fallbackHelp}`
         );
         return NextResponse.json({ ok: true });
       }
@@ -1119,7 +1131,8 @@ export async function POST(request: NextRequest) {
             aiResult,
             mappedCat.categoryName,
             mappedBrand.brandName,
-            sessionId
+            sessionId,
+            currentLangKey
           );
 
           await sendTelegramMessage(chatId, promptText, keyboard);
@@ -1155,15 +1168,15 @@ export async function POST(request: NextRequest) {
           const inlineCatButtons = rootCats.map((c) => [
             { text: `📁 ${c.name}`, callback_data: `select_cat_${c.id}` },
           ]);
-          inlineCatButtons.push([{ text: '❌ Cancel', callback_data: `cancel_${sessionId}` }]);
+          inlineCatButtons.push([{ text: getTelegramText(currentLangKey, 'btn_cancel'), callback_data: `cancel_${sessionId}` }]);
 
           await sendTelegramMessage(
             chatId,
-            `✨ <b>AI Fashion Recognition Complete!</b>\n\n` +
-            `🏷 <b>Title:</b> ${aiResult.title}\n` +
-            `🎨 <b>Color:</b> ${aiResult.color}\n` +
-            `👤 <b>Target:</b> ${aiResult.gender}\n\n` +
-            `❓ <b>Please choose the closest category for this item:</b>`,
+            `✨ <b>${getTelegramText(currentLangKey, 'ai_complete')}</b>\n\n` +
+            `🏷 <b>${getTelegramText(currentLangKey, 'label_title')}:</b> ${aiResult.title}\n` +
+            `🎨 <b>${getTelegramText(currentLangKey, 'label_color')}:</b> ${aiResult.color}\n` +
+            `👤 <b>${getTelegramText(currentLangKey, 'label_gender')}:</b> ${aiResult.gender}\n\n` +
+            `❓ <b>${getTelegramText(currentLangKey, 'choose_category_prompt')}</b>`,
             { inline_keyboard: inlineCatButtons }
           );
         }
@@ -1211,12 +1224,24 @@ export async function POST(request: NextRequest) {
     if (activeSession) {
       // Step A: AWAITING_PRICE
       if (activeSession.step === 'AWAITING_PRICE') {
-        const priceRes = validatePriceInput(text);
+        const priceRes = validatePriceInput(text, currentLangKey);
 
         if (!priceRes.valid || !priceRes.price) {
+          const invalidPriceHeader = currentLangKey === 'uz'
+            ? "⚠️ <b>Noto'g'ri narx</b>"
+            : currentLangKey === 'ru'
+            ? '⚠️ <b>Неверная цена</b>'
+            : '⚠️ <b>Invalid Price</b>';
+
+          const priceExample = currentLangKey === 'uz'
+            ? "*Misol: <code>450000</code> yoki <code>450 000</code>*\n*Bekor qilish uchun /cancel yuboring*"
+            : currentLangKey === 'ru'
+            ? '*Пример: <code>450000</code> или <code>450 000</code>*\n*Для отмены отправьте /cancel*'
+            : '*Example: <code>450000</code> or <code>450 000</code>*\n*To cancel, send /cancel*';
+
           await sendTelegramMessage(
             chatId,
-            `⚠️ <b>Invalid Price / Noto'g'ri narx</b>\n\n${priceRes.error || 'Please enter a valid price in UZS.'}\n\n*Example: <code>450000</code> or <code>450 000</code>*\n*To cancel, send /cancel*`
+            `${invalidPriceHeader}\n\n${priceRes.error || (currentLangKey === 'uz' ? "Iltimos, so'mda to'g'ri narx kiriting." : currentLangKey === 'ru' ? 'Пожалуйста, введите корректную цену в UZS.' : 'Please enter a valid price in UZS.')}\n\n${priceExample}`
           );
           return NextResponse.json({ ok: true });
         }
@@ -1233,17 +1258,17 @@ export async function POST(request: NextRequest) {
 
         await sendTelegramMessage(
           chatId,
-          `✅ <b>Price Confirmed:</b> <b>${priceRes.price.toLocaleString()} UZS</b>\n\n` +
-          `📦 <b>Step 2/2 — Set Available Stock</b>\n` +
-          `Please enter the inventory quantity (whole number ≥ 1, e.g. <code>10</code>) or select a quick option below:`,
+          `${getTelegramText(currentLangKey, 'price_confirmed', { price: priceRes.price.toLocaleString() })}\n\n` +
+          `${getTelegramText(currentLangKey, 'step2_header')}\n` +
+          `${getTelegramText(currentLangKey, 'enter_stock_prompt')}`,
           {
             inline_keyboard: [
               [
-                { text: '1 pc', callback_data: 'set_stock_1' },
-                { text: '5 pcs', callback_data: 'set_stock_5' },
-                { text: '10 pcs', callback_data: 'set_stock_10' },
+                { text: getTelegramText(currentLangKey, 'btn_stock_1'), callback_data: 'set_stock_1' },
+                { text: getTelegramText(currentLangKey, 'btn_stock_5'), callback_data: 'set_stock_5' },
+                { text: getTelegramText(currentLangKey, 'btn_stock_10'), callback_data: 'set_stock_10' },
               ],
-              [{ text: '❌ Cancel', callback_data: `cancel_${activeSession.id}` }],
+              [{ text: getTelegramText(currentLangKey, 'btn_cancel'), callback_data: `cancel_${activeSession.id}` }],
             ],
           }
         );
@@ -1252,12 +1277,24 @@ export async function POST(request: NextRequest) {
 
       // Step B: AWAITING_STOCK
       if (activeSession.step === 'AWAITING_STOCK') {
-        const stockRes = validateStockInput(text);
+        const stockRes = validateStockInput(text, currentLangKey);
 
         if (!stockRes.valid || !stockRes.stock) {
+          const invalidStockHeader = currentLangKey === 'uz'
+            ? "⚠️ <b>Noto'g'ri miqdor</b>"
+            : currentLangKey === 'ru'
+            ? '⚠️ <b>Неверное количество</b>'
+            : '⚠️ <b>Invalid Stock</b>';
+
+          const stockExample = currentLangKey === 'uz'
+            ? "*Misol: <code>5</code> yoki <code>10</code>*\n*Bekor qilish uchun /cancel yuboring*"
+            : currentLangKey === 'ru'
+            ? '*Пример: <code>5</code> или <code>10</code>*\n*Для отмены отправьте /cancel*'
+            : '*Example: <code>5</code> or <code>10</code>*\n*To cancel, send /cancel*';
+
           await sendTelegramMessage(
             chatId,
-            `⚠️ <b>Invalid Stock / Noto'g'ri miqdor</b>\n\n${stockRes.error || 'Please enter a valid whole number.'}\n\n*Example: <code>5</code> or <code>10</code>*\n*To cancel, send /cancel*`
+            `${invalidStockHeader}\n\n${stockRes.error || (currentLangKey === 'uz' ? "Iltimos, butun son kiriting." : currentLangKey === 'ru' ? 'Пожалуйста, введите целое число.' : 'Please enter a valid whole number.')}\n\n${stockExample}`
           );
           return NextResponse.json({ ok: true });
         }
@@ -1287,12 +1324,12 @@ export async function POST(request: NextRequest) {
           price: activeSession.draft?.price || 0,
           stock: stockRes.stock,
           tags: ai.tags || [],
-        });
+        }, currentLangKey);
 
         await sendTelegramMessage(chatId, previewText, {
           inline_keyboard: [
-            [{ text: '🚀 Publish Product', callback_data: `publish_${activeSession.id}` }],
-            [{ text: '❌ Cancel', callback_data: `cancel_${activeSession.id}` }],
+            [{ text: getTelegramText(currentLangKey, 'btn_publish'), callback_data: `publish_${activeSession.id}` }],
+            [{ text: getTelegramText(currentLangKey, 'btn_cancel'), callback_data: `cancel_${activeSession.id}` }],
           ],
         });
         return NextResponse.json({ ok: true });
