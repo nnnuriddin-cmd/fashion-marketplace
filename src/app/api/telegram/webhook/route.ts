@@ -838,24 +838,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Timing diagnostics for /start command latency analysis
-    const isStartCommand = text === '/start';
-    const startHandlerTime = isStartCommand ? Date.now() : 0;
-    let usersMs = 0;
-    let authMs = 0;
-    let storesMs = 0;
-    let telegramMs = 0;
-
     // 3.2 Authenticate user strictly by verified telegram_id
-    const tUsersStart = isStartCommand ? Date.now() : 0;
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id, role')
       .eq('telegram_id', chatId)
       .maybeSingle();
-    if (isStartCommand) {
-      usersMs = Date.now() - tUsersStart;
-    }
 
     if (userError) throw userError;
 
@@ -863,66 +851,38 @@ export async function POST(request: NextRequest) {
       // Unknown / unlinked Telegram user:
       // Default response language is ALWAYS Uzbek.
       // Show Access Denied in Uzbek and provide language selector so user can choose another language.
-      const tTelegramStart = isStartCommand ? Date.now() : 0;
       await sendTelegramMessage(
         chatId,
         getAccessDeniedMessage('uz'),
         LANGUAGE_SELECTOR_KEYBOARD
       );
-      if (isStartCommand) {
-        telegramMs = Date.now() - tTelegramStart;
-        const totalMs = Date.now() - startHandlerTime;
-        console.log(
-          `[TELEGRAM_START_TIMING]\n${JSON.stringify(
-            {
-              totalMs,
-              usersMs,
-              authMs,
-              storesMs,
-              telegramMs,
-            },
-            null,
-            2
-          )}`
-        );
-      }
       return NextResponse.json({ ok: true });
     }
 
+    // 3.3 Concurrently fetch seller's auth metadata (preferred language) and store record
+    const [authResult, storeResult] = await Promise.all([
+      supabase.auth.admin.getUserById(user.id).catch((err) => ({ data: null, error: err })),
+      supabase
+        .from('stores')
+        .select('id, name, status')
+        .eq('owner_id', user.id)
+        .maybeSingle(),
+    ]);
+
+    const { data: store, error: storeError } = storeResult;
+    if (storeError) throw storeError;
+
     // Read seller's preferred language from Supabase Auth user_metadata
     let preferredLanguage: 'ru' | 'uz' | 'en' | null = null;
-    const tAuthStart = isStartCommand ? Date.now() : 0;
-    try {
-      const { data: authUserData, error: authUserErr } = await supabase.auth.admin.getUserById(user.id);
-      if (authUserErr) {
-        console.warn('Failed to retrieve user_metadata for seller:', user.id, authUserErr);
-      }
-      const savedLang = authUserData?.user?.user_metadata?.preferred_language;
-      if (savedLang && ['ru', 'uz', 'en'].includes(savedLang)) {
-        preferredLanguage = savedLang as 'ru' | 'uz' | 'en';
-      }
-    } catch (langErr) {
-      console.warn('Failed to retrieve user_metadata for seller:', user.id, langErr);
-    } finally {
-      if (isStartCommand) {
-        authMs = Date.now() - tAuthStart;
-      }
+    if (authResult.error) {
+      console.warn('Failed to retrieve user_metadata for seller:', user.id, authResult.error);
+    }
+    const savedLang = authResult.data?.user?.user_metadata?.preferred_language;
+    if (savedLang && ['ru', 'uz', 'en'].includes(savedLang)) {
+      preferredLanguage = savedLang as 'ru' | 'uz' | 'en';
     }
 
     const currentLangKey: 'ru' | 'uz' | 'en' = resolveTelegramLanguage(preferredLanguage);
-
-    // 3.3 Authorize seller store (strictly by owner_id)
-    const tStoresStart = isStartCommand ? Date.now() : 0;
-    const { data: store, error: storeError } = await supabase
-      .from('stores')
-      .select('id, name, status')
-      .eq('owner_id', user.id)
-      .maybeSingle();
-    if (isStartCommand) {
-      storesMs = Date.now() - tStoresStart;
-    }
-
-    if (storeError) throw storeError;
 
     if (!store) {
       const noStoreMsgs: Record<string, string> = {
@@ -930,25 +890,7 @@ export async function POST(request: NextRequest) {
         ru: '⚠️ <b>Магазин не найден</b>\n\nК вашему аккаунту не привязан магазин. Пожалуйста, создайте или привяжите магазин в панели продавца перед управлением товарами.',
         en: '⚠️ <b>No Store Found</b>\n\nNo merchant store is linked to your account. Please create or link your store in the Seller Portal before managing inventory.',
       };
-      const tTelegramStart = isStartCommand ? Date.now() : 0;
       await sendTelegramMessage(chatId, noStoreMsgs[currentLangKey]);
-      if (isStartCommand) {
-        telegramMs = Date.now() - tTelegramStart;
-        const totalMs = Date.now() - startHandlerTime;
-        console.log(
-          `[TELEGRAM_START_TIMING]\n${JSON.stringify(
-            {
-              totalMs,
-              usersMs,
-              authMs,
-              storesMs,
-              telegramMs,
-            },
-            null,
-            2
-          )}`
-        );
-      }
       return NextResponse.json({ ok: true });
     }
 
@@ -958,25 +900,7 @@ export async function POST(request: NextRequest) {
         ru: `⚠️ <b>Магазин не активен</b>\n\nВаш магазин "<b>${store.name}</b>" в настоящее время находится в статусе <b>${store.status}</b>. Операции с товарами станут доступны после одобрения магазина.`,
         en: `⚠️ <b>Store Not Active</b>\n\nYour store "<b>${store.name}</b>" is currently <b>${store.status}</b>. Product operations will be available once your store is approved.`,
       };
-      const tTelegramStart = isStartCommand ? Date.now() : 0;
       await sendTelegramMessage(chatId, storeInactiveMsgs[currentLangKey]);
-      if (isStartCommand) {
-        telegramMs = Date.now() - tTelegramStart;
-        const totalMs = Date.now() - startHandlerTime;
-        console.log(
-          `[TELEGRAM_START_TIMING]\n${JSON.stringify(
-            {
-              totalMs,
-              usersMs,
-              authMs,
-              storesMs,
-              telegramMs,
-            },
-            null,
-            2
-          )}`
-        );
-      }
       return NextResponse.json({ ok: true });
     }
 
@@ -988,26 +912,7 @@ export async function POST(request: NextRequest) {
         en: `👋 <b>Welcome back to TrendMall!</b>\n\nUse the menu below to manage <b>${store.name}</b>.`,
       };
 
-      const tTelegramStart = Date.now();
       await sendTelegramMessage(chatId, welcomeTexts[currentLangKey], getLocalizedMenu(currentLangKey));
-      telegramMs = Date.now() - tTelegramStart;
-
-      const totalMs = Date.now() - startHandlerTime;
-
-      console.log(
-        `[TELEGRAM_START_TIMING]\n${JSON.stringify(
-          {
-            totalMs,
-            usersMs,
-            authMs,
-            storesMs,
-            telegramMs,
-          },
-          null,
-          2
-        )}`
-      );
-
       return NextResponse.json({ ok: true });
     }
 
