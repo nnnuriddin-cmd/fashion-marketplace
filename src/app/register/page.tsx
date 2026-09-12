@@ -7,16 +7,24 @@ import { T } from '@/lib/i18n/translations';
 
 export const revalidate = 0;
 
-export default async function RegisterPage() {
+interface RegisterPageProps {
+  searchParams?: {
+    role?: string;
+  };
+}
+
+export default async function RegisterPage({ searchParams }: RegisterPageProps) {
   // If already authenticated, redirect directly to /account
   const authUser = await getCurrentUser();
   if (authUser) {
     redirect('/account');
   }
 
+  const initialRole = searchParams?.role?.toLowerCase() === 'seller' ? 'SELLER' : undefined;
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-12 text-center space-y-6">
-      <RegisterForm />
+      <RegisterForm initialRole={initialRole} />
 
       <div className="inline-flex items-center gap-2 text-xs text-neutral-400">
         <Sparkles className="w-3.5 h-3.5 text-amber-600" />
@@ -25,3 +33,4 @@ export default async function RegisterPage() {
     </div>
   );
 }
+
