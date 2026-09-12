@@ -19,6 +19,39 @@ import {
 } from '@/lib/telegram/product-draft';
 
 /**
+ * Resolves language for a Telegram user with the following priority:
+ * 1. Saved explicit preference: auth.users.user_metadata.preferred_language
+ * 2. Telegram language: from.language_code (supporting regional variants like ru-RU, en-US, uz-UZ)
+ * 3. Default fallback: 'uz'
+ */
+function resolveTelegramLanguage(
+  preferredLanguage: unknown,
+  telegramLanguageCode: unknown
+): 'uz' | 'ru' | 'en' {
+  if (typeof preferredLanguage === 'string') {
+    const cleanPref = preferredLanguage.trim().toLowerCase();
+    if (cleanPref === 'uz' || cleanPref === 'ru' || cleanPref === 'en') {
+      return cleanPref;
+    }
+  }
+
+  if (typeof telegramLanguageCode === 'string') {
+    const cleanCode = telegramLanguageCode.trim().toLowerCase();
+    if (cleanCode === 'ru' || cleanCode.startsWith('ru-')) {
+      return 'ru';
+    }
+    if (cleanCode === 'en' || cleanCode.startsWith('en-')) {
+      return 'en';
+    }
+    if (cleanCode === 'uz' || cleanCode.startsWith('uz-')) {
+      return 'uz';
+    }
+  }
+
+  return 'uz';
+}
+
+/**
  * Returns localized ReplyKeyboardMarkup based on preferred language.
  */
 function getLocalizedMenu(lang?: string | null) {
@@ -125,6 +158,7 @@ export async function POST(request: NextRequest) {
       const cbId = cb.id;
       const chatId = String(cb.message?.chat?.id || cb.from?.id);
       const data = String(cb.data || '');
+      const telegramLangCode = cb.from?.language_code;
 
       // Authenticate Telegram user strictly from chatId (never from callback data)
       const { data: user, error: userError } = await supabase
@@ -149,23 +183,29 @@ export async function POST(request: NextRequest) {
 
       if (storeError) throw storeError;
 
-      if (!store || store.status !== 'APPROVED') {
-        await answerTelegramCallbackQuery(cbId, 'Store is not active', true);
-        await sendTelegramMessage(
-          chatId,
-          `⚠️ <b>Store Inactive</b>\n\nYour store "${store?.name || 'Unknown'}" is currently ${store?.status || 'NOT APPROVED'}. Cannot perform product operations.`
-        );
-        return NextResponse.json({ ok: true });
-      }
-
       // Read seller's current preferred language from Supabase Auth user_metadata
-      let sellerLang: 'uz' | 'ru' | 'en' = 'uz';
+      let sellerPrefLang: string | null = null;
       try {
         const { data: authData } = await supabase.auth.admin.getUserById(user.id);
         const l = authData?.user?.user_metadata?.preferred_language;
-        if (l && ['ru', 'uz', 'en'].includes(l)) sellerLang = l as 'uz' | 'ru' | 'en';
+        if (l && ['ru', 'uz', 'en'].includes(l)) sellerPrefLang = l;
       } catch (e) {
         console.warn('Could not read seller preferred_language:', e);
+      }
+      const sellerLang = resolveTelegramLanguage(sellerPrefLang, telegramLangCode);
+
+      if (!store || store.status !== 'APPROVED') {
+        await answerTelegramCallbackQuery(cbId, 'Store is not active', true);
+        const storeInactiveTexts: Record<string, string> = {
+          uz: `⚠️ <b>Do'kon faol emas</b>\n\nSizning "${store?.name || 'Noma\'lum'}" do'koningiz hozirda ${store?.status || 'TASDIQLANMAGAN'}. Mahsulot amallarini bajarish mumkin emas.`,
+          ru: `⚠️ <b>Магазин не активен</b>\n\nВаш магазин "${store?.name || 'Неизвестно'}" в настоящее время ${store?.status || 'НЕ ОДОБРЕН'}. Операции с товарами невозможны.`,
+          en: `⚠️ <b>Store Inactive</b>\n\nYour store "${store?.name || 'Unknown'}" is currently ${store?.status || 'NOT APPROVED'}. Cannot perform product operations.`,
+        };
+        await sendTelegramMessage(
+          chatId,
+          storeInactiveTexts[sellerLang]
+        );
+        return NextResponse.json({ ok: true });
       }
 
       // 2.1 Language selection callback (language_ru, language_uz, language_en)
@@ -616,6 +656,7 @@ export async function POST(request: NextRequest) {
     if (!message) return NextResponse.json({ ok: true });
     const chatId = String(message.chat.id);
     const text = message.text?.trim() || '';
+    const telegramLangCode = message.from?.language_code;
 
     // 3.1 Handle One-Time Account Linking (/link CODE or /start CODE)
     let linkCode: string | null = null;
@@ -626,14 +667,16 @@ export async function POST(request: NextRequest) {
     }
 
     if (linkCode) {
+      const initialTelegramLang = resolveTelegramLanguage(null, telegramLangCode);
       const normalizedCode = linkCode.toUpperCase();
 
       if (!/^[A-F0-9]{32}$/i.test(normalizedCode)) {
-        await sendTelegramMessage(
-          chatId,
-          '⚠️ <b>Invalid Linking Code / Noto\'g\'ri kod</b>\n\n' +
-          'Please provide a valid 32-character linking code from your TrendMall seller account.'
-        );
+        const invalidCodeMsgs: Record<string, string> = {
+          uz: "⚠️ <b>Noto'g'ri kod</b>\n\nIltimos, TrendMall sotuvchi hisobingizdagi 32 belgidan iborat to'g'ri ulanish kodini kiriting.",
+          ru: '⚠️ <b>Неверный код</b>\n\nПожалуйста, укажите корректный 32-значный код привязки из вашего аккаунта продавца TrendMall.',
+          en: '⚠️ <b>Invalid Linking Code</b>\n\nPlease provide a valid 32-character linking code from your TrendMall seller account.',
+        };
+        await sendTelegramMessage(chatId, invalidCodeMsgs[initialTelegramLang]);
         return NextResponse.json({ ok: true });
       }
 
@@ -646,11 +689,12 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
       if (searchErr || !matchedUser || !matchedUser.telegram_code) {
-        await sendTelegramMessage(
-          chatId,
-          '❌ <b>Invalid or Expired Code / Kod yaroqsiz yoki muddati o\'tgan</b>\n\n' +
-          'No active linking request found for this code. Please generate a fresh code in your TrendMall account.'
-        );
+        const notFoundMsgs: Record<string, string> = {
+          uz: "❌ <b>Kod yaroqsiz yoki muddati o'tgan</b>\n\nUshbu kod uchun faol ulanish so'rovi topilmadi. Iltimos, TrendMall hisobingizda yangi kod yarating.",
+          ru: '❌ <b>Неверный или просроченный код</b>\n\nАктивный запрос на привязку для этого кода не найден. Пожалуйста, сгенерируйте новый код в вашем аккаунте TrendMall.',
+          en: '❌ <b>Invalid or Expired Code</b>\n\nNo active linking request found for this code. Please generate a fresh code in your TrendMall account.',
+        };
+        await sendTelegramMessage(chatId, notFoundMsgs[initialTelegramLang]);
         return NextResponse.json({ ok: true });
       }
 
@@ -658,21 +702,23 @@ export async function POST(request: NextRequest) {
       const expiresAt = parseInt(parts[1], 10);
       if (!expiresAt || Date.now() > expiresAt) {
         await supabase.from('users').update({ telegram_code: null }).eq('id', matchedUser.id);
-        await sendTelegramMessage(
-          chatId,
-          '⏳ <b>Code Expired / Kod muddati o\'tdi</b>\n\n' +
-          'This linking code has expired (codes are valid for 10 minutes). Please generate a fresh code in your TrendMall account.'
-        );
+        const expiredMsgs: Record<string, string> = {
+          uz: "⏳ <b>Kod muddati o'tgan</b>\n\nUlanish kodi muddati tugagan (kodlar 10 daqiqa davomida amal qiladi). Iltimos, TrendMall hisobingizda yangi kod yarating.",
+          ru: '⏳ <b>Срок действия кода истёк</b>\n\nСрок действия кода привязки истёк (коды действительны 10 минут). Пожалуйста, сгенерируйте новый код в вашем аккаунте TrendMall.',
+          en: '⏳ <b>Code Expired</b>\n\nThis linking code has expired (codes are valid for 10 minutes). Please generate a fresh code in your TrendMall account.',
+        };
+        await sendTelegramMessage(chatId, expiredMsgs[initialTelegramLang]);
         return NextResponse.json({ ok: true });
       }
 
       if (matchedUser.role !== 'SELLER') {
         await supabase.from('users').update({ telegram_code: null }).eq('id', matchedUser.id);
-        await sendTelegramMessage(
-          chatId,
-          '⛔ <b>Access Denied / Ruxsat berilmadi</b>\n\n' +
-          'Only registered sellers can connect a Telegram account to TrendMall.'
-        );
+        const notSellerMsgs: Record<string, string> = {
+          uz: "⛔ <b>Ruxsat berilmadi</b>\n\nFaqat ro'yxatdan o'tgan sotuvchilar Telegram hisobini TrendMall'ga ulashi mumkin.",
+          ru: '⛔ <b>Доступ запрещен</b>\n\nТолько зарегистрированные продавцы могут привязать аккаунт Telegram к TrendMall.',
+          en: '⛔ <b>Access Denied</b>\n\nOnly registered sellers can connect a Telegram account to TrendMall.',
+        };
+        await sendTelegramMessage(chatId, notSellerMsgs[initialTelegramLang]);
         return NextResponse.json({ ok: true });
       }
 
@@ -684,11 +730,12 @@ export async function POST(request: NextRequest) {
 
       if (storeCheckErr || !targetStore) {
         await supabase.from('users').update({ telegram_code: null }).eq('id', matchedUser.id);
-        await sendTelegramMessage(
-          chatId,
-          '⚠️ <b>No Store Found / Do\'kon topilmadi</b>\n\n' +
-          'No merchant boutique is associated with this account. Please register your store first.'
-        );
+        const noStoreMsgs: Record<string, string> = {
+          uz: "⚠️ <b>Do'kon topilmadi</b>\n\nUshbu hisobga biriktirilgan do'kon topilmadi. Iltimos, avval do'koningizni ro'yxatdan o'tkazing.",
+          ru: '⚠️ <b>Магазин не найден</b>\n\nК данному аккаунту не привязан магазин. Пожалуйста, сначала зарегистрируйте ваш магазин.',
+          en: '⚠️ <b>No Store Found</b>\n\nNo merchant boutique is associated with this account. Please register your store first.',
+        };
+        await sendTelegramMessage(chatId, noStoreMsgs[initialTelegramLang]);
         return NextResponse.json({ ok: true });
       }
 
@@ -699,11 +746,12 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
       if (existingUserWithChatId && existingUserWithChatId.id !== matchedUser.id) {
-        await sendTelegramMessage(
-          chatId,
-          '⛔ <b>Account Conflict / Boshqa hisobga ulangan</b>\n\n' +
-          'This Telegram account is already linked to another TrendMall seller account. Please unlink it from that account first.'
-        );
+        const conflictMsgs: Record<string, string> = {
+          uz: "⛔ <b>Boshqa hisobga ulangan</b>\n\nUshbu Telegram hisobi allaqachon boshqa TrendMall sotuvchi akkauntiga ulangan. Iltimos, avval uni avvalgi hisobdan uzing.",
+          ru: '⛔ <b>Конфликт аккаунтов</b>\n\nЭтот аккаунт Telegram уже привязан к другому аккаунту продавца TrendMall. Пожалуйста, сначала отключите его от предыдущего аккаунта.',
+          en: '⛔ <b>Account Conflict</b>\n\nThis Telegram account is already linked to another TrendMall seller account. Please unlink it from that account first.',
+        };
+        await sendTelegramMessage(chatId, conflictMsgs[initialTelegramLang]);
         return NextResponse.json({ ok: true });
       }
 
@@ -719,62 +767,33 @@ export async function POST(request: NextRequest) {
         .select('id');
 
       if (linkErr || !updatedRows || updatedRows.length === 0) {
-        await sendTelegramMessage(
-          chatId,
-          '⚠️ <b>Linking Failed / Ulanish amalga oshmadi</b>\n\n' +
-          'This code may have already been consumed or expired. Please generate a new code in your TrendMall account.'
-        );
+        const linkFailedMsgs: Record<string, string> = {
+          uz: "⚠️ <b>Ulanish amalga oshmadi</b>\n\nUshbu kod allaqachon ishlatilgan yoki muddati o'tgan bo'lishi mumkin. Iltimos, TrendMall hisobingizda yangi kod yarating.",
+          ru: '⚠️ <b>Ошибка привязки</b>\n\nВозможно, этот код уже был использован или его срок действия истёк. Пожалуйста, сгенерируйте новый код в вашем аккаунте TrendMall.',
+          en: '⚠️ <b>Linking Failed</b>\n\nThis code may have already been consumed or expired. Please generate a new code in your TrendMall account.',
+        };
+        await sendTelegramMessage(chatId, linkFailedMsgs[initialTelegramLang]);
         return NextResponse.json({ ok: true });
       }
 
       // Check if language was previously selected in user_metadata
-      let initialLang: 'ru' | 'uz' | 'en' | null = null;
+      let savedPrefLang: string | null = null;
       try {
         const { data: authU } = await supabase.auth.admin.getUserById(matchedUser.id);
         const l = authU?.user?.user_metadata?.preferred_language;
-        if (l && ['ru', 'uz', 'en'].includes(l)) initialLang = l as 'ru' | 'uz' | 'en';
+        if (l && ['ru', 'uz', 'en'].includes(l)) savedPrefLang = l;
       } catch (e) {
         // silent
       }
 
-      if (initialLang) {
-        const welcomeConnected: Record<string, string> = {
-          ru: `✅ <b>Telegram успешно подключён!</b>\n\nВаш аккаунт связан с бутиком <b>${targetStore.name}</b>.\n\nИспользуйте меню ниже для работы с заказами и товарами.`,
-          uz: `✅ <b>Telegram muvaffaqiyatli ulandi!</b>\n\nSizning hisobingiz <b>${targetStore.name}</b> butigiga ulandi.\n\nBuyurtmalar va mahsulotlar bilan ishlash uchun quyidagi menyudan foydalaning.`,
-          en: `✅ <b>Telegram Successfully Linked!</b>\n\nYour account is connected to <b>${targetStore.name}</b>.\n\nUse the menu below to manage orders and inventory.`,
-        };
-        await sendTelegramMessage(chatId, welcomeConnected[initialLang], getLocalizedMenu(initialLang));
-      } else {
-        // First connection: default to 'uz' and persist it
-        const fallbackLang: 'uz' = 'uz';
-        try {
-          const { error: persistErr } = await supabase.auth.admin.updateUserById(matchedUser.id, {
-            user_metadata: { preferred_language: fallbackLang },
-          });
-          if (persistErr) {
-            console.error('Failed to persist fallback language on link for user:', matchedUser.id, persistErr);
-          }
-        } catch (e) {
-          console.error('Unexpected error persisting fallback language on link:', e);
-        }
+      const linkLang = resolveTelegramLanguage(savedPrefLang, telegramLangCode);
 
-        // a) Send welcome/menu message with ReplyKeyboardMarkup (bottom keyboard armed immediately)
-        const welcomeConnectedFirst = `✅ <b>Telegram muvaffaqiyatli ulandi!</b>\n\nSizning hisobingiz <b>${targetStore.name}</b> butigiga ulandi.\n\nBuyurtmalar va mahsulotlar bilan ishlash uchun quyidagi menyudan foydalaning.`;
-        await sendTelegramMessage(chatId, welcomeConnectedFirst, getLocalizedMenu(fallbackLang));
-
-        // b) Also prompt for language choice via InlineKeyboardMarkup so seller can change if desired
-        await sendTelegramMessage(
-          chatId,
-          `🌐 <b>Tilni tanlang / Пожалуйста, выберите язык / Choose a language:</b>`,
-          {
-            inline_keyboard: [[
-              { text: "🇺🇿 O‘zbekcha", callback_data: 'language_uz' },
-              { text: '🇷🇺 Русский', callback_data: 'language_ru' },
-              { text: '🇬🇧 English', callback_data: 'language_en' },
-            ]],
-          }
-        );
-      }
+      const welcomeConnected: Record<string, string> = {
+        ru: `✅ <b>Telegram успешно подключён!</b>\n\nВаш аккаунт связан с магазином <b>${targetStore.name}</b>.\n\nИспользуйте меню ниже для работы с заказами и товарами.`,
+        uz: `✅ <b>Telegram muvaffaqiyatli ulandi!</b>\n\nSizning hisobingiz <b>${targetStore.name}</b> do'koniga ulandi.\n\nBuyurtmalar va mahsulotlar bilan ishlash uchun quyidagi menyudan foydalaning.`,
+        en: `✅ <b>Telegram Successfully Linked!</b>\n\nYour account is connected to <b>${targetStore.name}</b>.\n\nUse the menu below to manage orders and inventory.`,
+      };
+      await sendTelegramMessage(chatId, welcomeConnected[linkLang], getLocalizedMenu(linkLang));
       return NextResponse.json({ ok: true });
     }
 
@@ -788,44 +807,35 @@ export async function POST(request: NextRequest) {
     if (userError) throw userError;
 
     if (!user || user.role !== 'SELLER') {
-      await sendTelegramMessage(
-        chatId,
-        '⛔ <b>Access Denied / Ruxsat berilmadi</b>\n\n' +
-        'Your Telegram account is not registered with any TrendMall seller account.\n\n' +
-        'To link your seller account:\n' +
-        '1. Log in to your TrendMall account at https://modora.uz/account\n' +
-        '2. Click <b>Connect Telegram</b> to get a one-time linking code\n' +
-        '3. Send <code>/link CODE</code> here in this chat.'
-      );
+      const deniedLang = resolveTelegramLanguage(null, telegramLangCode);
+      const accessDeniedMsgs: Record<string, string> = {
+        uz:
+          '⛔ <b>Ruxsat berilmadi</b>\n\n' +
+          "Sizning Telegram hisobingiz TrendMall sotuvchi akkauntiga ulanmagan.\n\n" +
+          "Sotuvchi hisobingizni ulash uchun:\n" +
+          "1. TrendMall hisobingizga kiring: https://modora.uz/account\n" +
+          "2. Bir martalik ulanish kodini olish uchun <b>Telegram'ni ulash</b> tugmasini bosing\n" +
+          "3. Ushbu chatga <code>/link KOD</code> xabarini yuboring.",
+        ru:
+          '⛔ <b>Доступ запрещен</b>\n\n' +
+          'Ваш аккаунт Telegram не привязан к аккаунту продавца TrendMall.\n\n' +
+          'Чтобы привязать аккаунт продавца:\n' +
+          '1. Войдите в свой аккаунт TrendMall: https://modora.uz/account\n' +
+          '2. Нажмите <b>Подключить Telegram</b>, чтобы получить одноразовый код\n' +
+          '3. Отправьте <code>/link КОД</code> сюда в этот чат.',
+        en:
+          '⛔ <b>Access Denied</b>\n\n' +
+          'Your Telegram account is not registered with any TrendMall seller account.\n\n' +
+          'To link your seller account:\n' +
+          '1. Log in to your TrendMall account at https://modora.uz/account\n' +
+          '2. Click <b>Connect Telegram</b> to get a one-time linking code\n' +
+          '3. Send <code>/link CODE</code> here in this chat.',
+      };
+      await sendTelegramMessage(chatId, accessDeniedMsgs[deniedLang]);
       return NextResponse.json({ ok: true });
     }
 
-    // 3.3 Authorize seller store (strictly by owner_id)
-    const { data: store, error: storeError } = await supabase
-      .from('stores')
-      .select('id, name, status')
-      .eq('owner_id', user.id)
-      .maybeSingle();
-
-    if (storeError) throw storeError;
-
-    if (!store) {
-      await sendTelegramMessage(
-        chatId,
-        '⚠️ <b>No Store Found / Do\'kon topilmadi</b>\n\nNo merchant store is linked to your account. Please create or link your store in the Seller Portal before managing inventory.'
-      );
-      return NextResponse.json({ ok: true });
-    }
-
-    if (store.status !== 'APPROVED') {
-      await sendTelegramMessage(
-        chatId,
-        `⚠️ <b>Store Not Active / Do'kon faol emas</b>\n\nYour store "<b>${store.name}</b>" is currently <b>${store.status}</b>. Product operations will be available once your store is approved.`
-      );
-      return NextResponse.json({ ok: true });
-    }
-
-    // 3.4 Read seller's preferred language from Supabase Auth user_metadata
+    // Read seller's preferred language from Supabase Auth user_metadata
     let preferredLanguage: 'ru' | 'uz' | 'en' | null = null;
     try {
       const { data: authUserData, error: authUserErr } = await supabase.auth.admin.getUserById(user.id);
@@ -840,7 +850,36 @@ export async function POST(request: NextRequest) {
       console.warn('Failed to retrieve user_metadata for seller:', user.id, langErr);
     }
 
-    const currentLangKey: 'ru' | 'uz' | 'en' = preferredLanguage || 'uz';
+    const currentLangKey: 'ru' | 'uz' | 'en' = resolveTelegramLanguage(preferredLanguage, telegramLangCode);
+
+    // 3.3 Authorize seller store (strictly by owner_id)
+    const { data: store, error: storeError } = await supabase
+      .from('stores')
+      .select('id, name, status')
+      .eq('owner_id', user.id)
+      .maybeSingle();
+
+    if (storeError) throw storeError;
+
+    if (!store) {
+      const noStoreMsgs: Record<string, string> = {
+        uz: "⚠️ <b>Do'kon topilmadi</b>\n\nHisobingizga bog'langan sotuvchi do'koni topilmadi. Mahsulotlarni boshqarishdan oldin Sotuvchi portalida do'koningizni ro'yxatdan o'tkazing.",
+        ru: '⚠️ <b>Магазин не найден</b>\n\nК вашему аккаунту не привязан магазин. Пожалуйста, создайте или привяжите магазин в панели продавца перед управлением товарами.',
+        en: '⚠️ <b>No Store Found</b>\n\nNo merchant store is linked to your account. Please create or link your store in the Seller Portal before managing inventory.',
+      };
+      await sendTelegramMessage(chatId, noStoreMsgs[currentLangKey]);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (store.status !== 'APPROVED') {
+      const storeInactiveMsgs: Record<string, string> = {
+        uz: `⚠️ <b>Do'kon faol emas</b>\n\nSizning "<b>${store.name}</b>" do'koningiz hozirda <b>${store.status}</b> holatida. Mahsulot operatsiyalari do'kon tasdiqlangandan so'ng mavjud bo'ladi.`,
+        ru: `⚠️ <b>Магазин не активен</b>\n\nВаш магазин "<b>${store.name}</b>" в настоящее время находится в статусе <b>${store.status}</b>. Операции с товарами станут доступны после одобрения магазина.`,
+        en: `⚠️ <b>Store Not Active</b>\n\nYour store "<b>${store.name}</b>" is currently <b>${store.status}</b>. Product operations will be available once your store is approved.`,
+      };
+      await sendTelegramMessage(chatId, storeInactiveMsgs[currentLangKey]);
+      return NextResponse.json({ ok: true });
+    }
 
     // 3.5 Handle /start for authenticated APPROVED seller
     if (text === '/start') {
@@ -850,37 +889,7 @@ export async function POST(request: NextRequest) {
         en: `👋 <b>Welcome back to TrendMall!</b>\n\nUse the menu below to manage <b>${store.name}</b>.`,
       };
 
-      if (preferredLanguage) {
-        // Seller has already chosen language: immediately send localized welcome message with ReplyKeyboardMarkup
-        await sendTelegramMessage(chatId, welcomeTexts[preferredLanguage], getLocalizedMenu(preferredLanguage));
-        return NextResponse.json({ ok: true });
-      }
-
-      // First-time /start when language is missing: fallback to 'uz' and persist it
-      const fallbackLang: 'uz' = 'uz';
-      try {
-        const { error: persistErr } = await supabase.auth.admin.updateUserById(user.id, {
-          user_metadata: { preferred_language: fallbackLang },
-        });
-        if (persistErr) {
-          console.error('Failed to persist fallback preferred_language for seller:', user.id, persistErr);
-        }
-      } catch (persistErr) {
-        console.error('Unexpected error persisting fallback preferred_language:', persistErr);
-      }
-
-      // a) Send welcome/menu message with ReplyKeyboardMarkup (seller gets bottom keyboard immediately)
-      await sendTelegramMessage(chatId, welcomeTexts[fallbackLang], getLocalizedMenu(fallbackLang));
-
-      // b) Also show inline language picker so seller can choose another language without replacing the keyboard
-      await sendTelegramMessage(chatId, '🌐 <b>Tilni tanlang / Выберите язык / Choose a language:</b>', {
-        inline_keyboard: [[
-          { text: "🇺🇿 O‘zbekcha", callback_data: 'language_uz' },
-          { text: '🇷🇺 Русский', callback_data: 'language_ru' },
-          { text: '🇬🇧 English', callback_data: 'language_en' },
-        ]],
-      });
-
+      await sendTelegramMessage(chatId, welcomeTexts[currentLangKey], getLocalizedMenu(currentLangKey));
       return NextResponse.json({ ok: true });
     }
 
