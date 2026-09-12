@@ -69,6 +69,24 @@ function getAccessDeniedMessage(lang: 'uz' | 'ru' | 'en'): string {
 }
 
 /**
+ * Sends chat action (e.g. 'typing') to Telegram so user sees immediate feedback.
+ * Non-blocking / fire-and-forget safe so network errors never break product flow.
+ */
+async function sendTelegramChatAction(chatId: string | number, action: string = 'typing') {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, action }),
+    });
+  } catch (err) {
+    console.warn('sendChatAction failed (non-critical):', err);
+  }
+}
+
+/**
  * Returns localized ReplyKeyboardMarkup based on preferred language.
  */
 function getLocalizedMenu(lang?: string | null) {
@@ -1039,6 +1057,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
+      // Send immediate feedback so user sees "typing..." in chat header before heavy processing
+      sendTelegramChatAction(chatId, 'typing').catch(() => {});
+
       // Download photo bytes into server memory
       const getFileRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${file.file_id}`);
       const getFileResult = await getFileRes.json();
@@ -1063,15 +1084,29 @@ export async function POST(request: NextRequest) {
       const arrayBuf = await imgRes.arrayBuffer();
       const imageBuffer = Buffer.from(arrayBuf);
 
-      // Process with Sharp to 1000x1000 WebP & upload to Supabase Storage bucket 'product-images'
+      // Re-trigger typing indicator so user sees activity throughout parallel processing
+      sendTelegramChatAction(chatId, 'typing').catch(() => {});
+
+      // Concurrently execute Sharp image processing / Supabase Storage upload AND Gemini Vision extraction
       const sessionId = crypto.randomUUID();
+
+      const imageProcessingPromise = processAndStoreProductImage({
+        inputBuffer: imageBuffer,
+        storeId: store.id,
+        fileId: sessionId,
+      });
+
+      const aiAnalysisPromise = analyzeClothingImage(imageBuffer, 'image/jpeg', currentLangKey).catch(
+        (aiErr: any) => {
+          console.warn('Gemini Vision extraction failed for store:', store.id, aiErr?.message || aiErr);
+          return null;
+        }
+      );
+
       let processedImage;
+      let aiResult: VisionAnalysisResult | null = null;
       try {
-        processedImage = await processAndStoreProductImage({
-          inputBuffer: imageBuffer,
-          storeId: store.id,
-          fileId: sessionId,
-        });
+        [processedImage, aiResult] = await Promise.all([imageProcessingPromise, aiAnalysisPromise]);
       } catch (procErr: any) {
         console.warn('Product image processing failed for store:', store.id, procErr?.message || procErr);
         const fallbackHelp = currentLangKey === 'uz'
@@ -1086,14 +1121,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
-      // Extract structured product attributes via Gemini Vision in seller's preferred language
-      let aiResult: VisionAnalysisResult | null = null;
-      try {
-        aiResult = await analyzeClothingImage(imageBuffer, 'image/jpeg', currentLangKey);
-      } catch (aiErr: any) {
-        console.warn('Gemini Vision extraction failed for store:', store.id, aiErr?.message || aiErr);
-      }
-
       // Clean up previous uncompleted draft sessions for this seller & store
       await supabase
         .from('telegram_sessions')
@@ -1102,9 +1129,11 @@ export async function POST(request: NextRequest) {
         .eq('store_id', store.id);
 
       if (aiResult) {
-        // Load real categories & brands from database
-        const { data: categories } = await supabase.from('categories').select('*');
-        const { data: brands } = await supabase.from('brands').select('*');
+        // Load real categories & brands from database concurrently
+        const [{ data: categories }, { data: brands }] = await Promise.all([
+          supabase.from('categories').select('*'),
+          supabase.from('brands').select('*'),
+        ]);
 
         const mappedCat = matchCategory(aiResult.category, aiResult.gender, categories || []);
         const mappedBrand = matchBrand(aiResult.brand, brands || []);
