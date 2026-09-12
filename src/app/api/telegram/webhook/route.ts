@@ -23,18 +23,27 @@ import {
 function getLocalizedMenu(lang?: string | null) {
   if (lang === 'ru') {
     return {
-      keyboard: [[{ text: '➕ Добавить товар' }, { text: '📦 Мои товары' }]],
+      keyboard: [
+        [{ text: '➕ Добавить товар' }, { text: '📦 Мои товары' }],
+        [{ text: '🌐 Язык' }],
+      ],
       resize_keyboard: true,
     };
   }
   if (lang === 'en') {
     return {
-      keyboard: [[{ text: '➕ Add Product' }, { text: '📦 My Products' }]],
+      keyboard: [
+        [{ text: '➕ Add Product' }, { text: '📦 My Products' }],
+        [{ text: '🌐 Language' }],
+      ],
       resize_keyboard: true,
     };
   }
   return {
-    keyboard: [[{ text: "➕ Mahsulot qo'shish" }, { text: '📦 Mening mahsulotlarim' }]],
+    keyboard: [
+      [{ text: "➕ Mahsulot qo'shish" }, { text: '📦 Mening mahsulotlarim' }],
+      [{ text: '🌐 Til' }],
+    ],
     resize_keyboard: true,
   };
 }
@@ -161,15 +170,23 @@ export async function POST(request: NextRequest) {
           : 'uz';
 
         // Persist preferred_language in Supabase Auth user_metadata
+        let updateFailed = false;
         try {
           const { error: updateErr } = await supabase.auth.admin.updateUserById(user.id, {
             user_metadata: { preferred_language: validLang },
           });
           if (updateErr) {
             console.error('Failed to persist preferred_language in auth user_metadata:', updateErr);
+            updateFailed = true;
           }
         } catch (metaErr) {
           console.error('Failed to persist preferred_language in auth user_metadata:', metaErr);
+          updateFailed = true;
+        }
+
+        if (updateFailed) {
+          await answerTelegramCallbackQuery(cbId, 'Failed to update language. Please try again.', true);
+          return NextResponse.json({ ok: true });
         }
 
         await answerTelegramCallbackQuery(cbId);
@@ -179,13 +196,13 @@ export async function POST(request: NextRequest) {
           await clearTelegramInlineKeyboard(chatId, cb.message.message_id);
         }
 
-        const welcome: Record<string, string> = {
-          ru: `✅ <b>Русский язык сохранён!</b>\n\nИспользуйте меню ниже для управления магазином <b>${store.name}</b>.`,
-          uz: `✅ <b>O'zbek tili saqlandi!</b>\n\n<b>${store.name}</b> do'koningizni boshqarish uchun quyidagi menyudan foydalaning.`,
-          en: `✅ <b>English language saved!</b>\n\nUse the menu below to manage <b>${store.name}</b>.`,
+        const confirmMsgs: Record<string, string> = {
+          uz: '✅ <b>Til o‘zgartirildi: O‘zbekcha</b>',
+          ru: '✅ <b>Язык изменён: Русский</b>',
+          en: '✅ <b>Language changed: English</b>',
         };
 
-        await sendTelegramMessage(chatId, welcome[validLang], getLocalizedMenu(validLang));
+        await sendTelegramMessage(chatId, confirmMsgs[validLang], getLocalizedMenu(validLang));
         return NextResponse.json({ ok: true });
       }
 
@@ -744,9 +761,9 @@ export async function POST(request: NextRequest) {
           `🌐 <b>Tilni tanlang / Пожалуйста, выберите язык / Choose a language:</b>`,
           {
             inline_keyboard: [[
-              { text: "O'zbekcha", callback_data: 'language_uz' },
-              { text: 'Русский', callback_data: 'language_ru' },
-              { text: 'English', callback_data: 'language_en' },
+              { text: "🇺🇿 O‘zbekcha", callback_data: 'language_uz' },
+              { text: '🇷🇺 Русский', callback_data: 'language_ru' },
+              { text: '🇬🇧 English', callback_data: 'language_en' },
             ]],
           }
         );
@@ -851,9 +868,9 @@ export async function POST(request: NextRequest) {
       // b) Also show inline language picker so seller can choose another language without replacing the keyboard
       await sendTelegramMessage(chatId, '🌐 <b>Tilni tanlang / Выберите язык / Choose a language:</b>', {
         inline_keyboard: [[
-          { text: "O'zbekcha", callback_data: 'language_uz' },
-          { text: 'Русский', callback_data: 'language_ru' },
-          { text: 'English', callback_data: 'language_en' },
+          { text: "🇺🇿 O‘zbekcha", callback_data: 'language_uz' },
+          { text: '🇷🇺 Русский', callback_data: 'language_ru' },
+          { text: '🇬🇧 English', callback_data: 'language_en' },
         ]],
       });
 
@@ -965,6 +982,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    // 3.8.1 Language selection button handler ('🌐 Til' / '🌐 Язык' / '🌐 Language')
+    const isLanguageButtonText =
+      text === '🌐 Til' ||
+      text === '🌐 Язык' ||
+      text === '🌐 Language' ||
+      text === '/language' ||
+      text.toLowerCase() === 'til' ||
+      text.toLowerCase() === 'язык' ||
+      text.toLowerCase() === 'language';
+
+    if (isLanguageButtonText) {
+      const langPromptTexts: Record<string, string> = {
+        uz: '🌐 <b>Tilni tanlang:</b>',
+        ru: '🌐 <b>Выберите язык:</b>',
+        en: '🌐 <b>Choose a language:</b>',
+      };
+
+      await sendTelegramMessage(
+        chatId,
+        langPromptTexts[currentLangKey] || langPromptTexts.uz,
+        {
+          inline_keyboard: [[
+            { text: "🇺🇿 O‘zbekcha", callback_data: 'language_uz' },
+            { text: '🇷🇺 Русский', callback_data: 'language_ru' },
+            { text: '🇬🇧 English', callback_data: 'language_en' },
+          ]],
+        }
+      );
+      return NextResponse.json({ ok: true });
+    }
+
     // 3.9 Seller Uploads Photo
     if (message.photo?.length) {
       const file = message.photo.at(-1);
@@ -1017,10 +1065,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
 
-      // Extract structured product attributes via Gemini Vision
+      // Extract structured product attributes via Gemini Vision in seller's preferred language
       let aiResult: VisionAnalysisResult | null = null;
       try {
-        aiResult = await analyzeClothingImage(imageBuffer);
+        aiResult = await analyzeClothingImage(imageBuffer, 'image/jpeg', currentLangKey);
       } catch (aiErr: any) {
         console.warn('Gemini Vision extraction failed for store:', store.id, aiErr?.message || aiErr);
       }

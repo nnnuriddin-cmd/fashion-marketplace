@@ -1,5 +1,7 @@
 import 'server-only';
 
+export type SupportedBotLanguage = 'uz' | 'ru' | 'en';
+
 export interface VisionAnalysisResult {
   title: string;
   description: string;
@@ -15,23 +17,65 @@ export interface VisionAnalysisResult {
   suggestedPrice?: number | null;
 }
 
-const SYSTEM_PROMPT = `You are a professional fashion catalog specialist for TrendMall, a luxury fashion marketplace.
+/**
+ * Constructs a language-aware Gemini system prompt.
+ * Human-facing fields are generated in the requested language (uz, ru, en).
+ * Machine-facing fields (category, gender) strictly remain in canonical English.
+ */
+export function getSystemPrompt(language: SupportedBotLanguage = 'uz'): string {
+  let langInstructions = '';
+
+  if (language === 'uz') {
+    langInstructions = `LANGUAGE REQUIREMENT:
+All human-facing fields ("title", "description", "color", "material", "style", "occasion", "season", "tags") MUST be written in natural, professional Uzbek using Latin script (O'zbek tili).
+DO NOT use Cyrillic script.
+Examples:
+- "title": Uzbek Latin, concise, 3-80 chars (e.g. "Keng bichimli bej rangli zig‘ir kostyum", "Ipak midi ko‘ylak").
+- "description": 2-3 sentences in Uzbek Latin detailing silhouette, fabric feel, cut, and key visual accents. Max 350 chars.
+- "color": Uzbek Latin (e.g. "Bej", "Qora", "To‘q ko‘k", "Zaytun yashil", "Oq / Moviy"). Max 30 chars.
+- "material": Uzbek Latin (e.g. "Zig‘ir", "Ipak", "Paxta", "Charm", "Denim", "Jun aralashmasi") if discernible, otherwise null.
+- "style": Uzbek Latin (e.g. "Minimalizm", "Erkin bichim", "Kundalik", "Klassik", "Ko‘cha modasi", "Nafis", "Vintaj") if uncertain, null.
+- "occasion": Uzbek Latin (e.g. "Kundalik", "Ish / Ofis", "Oqshom", "Rasmiy", "Sport") if uncertain, null.
+- "season": Uzbek Latin (e.g. "Yoz", "Qish", "Bahor", "Kuz", "Barcha fasllar") if uncertain, null.
+- "tags": 4 to 8 concise lowercase keywords in Uzbek Latin (e.g. ["zigir", "kostyum", "bej", "yozgi", "nafis"]).`;
+  } else if (language === 'ru') {
+    langInstructions = `LANGUAGE REQUIREMENT:
+All human-facing fields ("title", "description", "color", "material", "style", "occasion", "season", "tags") MUST be written in natural, professional Russian.
+Examples:
+- "title": Russian, concise, 3-80 chars (e.g. "Свободный льняной жакет бежевого цвета", "Шелковое платье миди").
+- "description": 2-3 sentences in Russian detailing silhouette, fabric feel, cut, and key visual accents. Max 350 chars.
+- "color": Russian (e.g. "Бежевый", "Матовый черный", "Оливковый", "Белый / Синий"). Max 30 chars.
+- "material": Russian (e.g. "Лен", "Шелк", "Хлопок", "Кожа", "Деним", "Шерстяная смесь") if discernible, otherwise null.
+- "style": Russian (e.g. "Минимализм", "Оверсайз", "Повседневный", "Классический", "Стритвир", "Элегантный", "Винтаж") if uncertain, null.
+- "occasion": Russian (e.g. "Повседневный", "Деловой", "Вечерний", "Торжественный", "Спорт") if uncertain, null.
+- "season": Russian (e.g. "Лето", "Зима", "Весна", "Осень", "Всесезонный") if uncertain, null.
+- "tags": 4 to 8 concise lowercase keywords in Russian (e.g. ["лен", "жакет", "бежевый", "лето", "шик"]).`;
+  } else {
+    langInstructions = `LANGUAGE REQUIREMENT:
+All human-facing fields ("title", "description", "color", "material", "style", "occasion", "season", "tags") MUST be written in natural, professional English.
+Examples:
+- "title": English, concise, 3-80 chars (e.g. "Oversized Beige Linen Blazer", "Silk Cowl-Neck Midi Dress").
+- "description": 2-3 sentences in English detailing silhouette, fabric feel, cut, and key visual accents. Max 350 chars.
+- "color": English (e.g. "Beige", "Matte Black", "Olive Green", "White / Navy"). Max 30 chars.
+- "material": English (e.g. "Linen", "Silk", "Cotton", "Leather", "Denim", "Wool Blend") if discernible, otherwise null.
+- "style": English (e.g. "Minimalist", "Oversized", "Casual", "Tailored", "Streetwear", "Elegant", "Vintage") if uncertain, null.
+- "occasion": English (e.g. "Casual", "Business", "Evening", "Formal", "Sport") if uncertain, null.
+- "season": English (e.g. "Summer", "Winter", "Spring", "Autumn", "All Season") if uncertain, null.
+- "tags": 4 to 8 concise lowercase keywords in English (e.g. ["linen", "blazer", "beige", "summer", "chic"]).`;
+  }
+
+  return `You are a professional fashion catalog specialist for TrendMall, a luxury fashion marketplace.
 Analyze the apparel or fashion accessory in this image and return a strictly structured JSON object.
 
-Follow these strict guidelines:
-1. "title": Concise, descriptive product title in English (e.g. "Oversized Beige Linen Blazer" or "Silk Cowl-Neck Midi Dress"). Do not include spam, clickbait, or made-up brands. Max 80 characters.
-2. "description": A factual 2-3 sentence product description describing the cut, silhouette, key visual details, and fit. Max 350 characters.
-3. "category": Primary fashion category suggestion (e.g. "Blazers & Jackets", "Dresses", "Tops & Blouses", "T-Shirts", "Shirts", "Sweaters & Knitwear", "Hoodies & Sweatshirts", "Coats & Outerwear", "Pants & Trousers", "Jeans", "Skirts", "Shorts", "Suits", "Sneakers", "Shoes & Boots", "Heels", "Bags & Handbags", "Accessories").
-4. "brand": The brand name ONLY if a logo or brand label is clearly visible and readable in the photo. If not visible, return null. Never guess.
-5. "color": The dominant primary color(s) (e.g. "Beige", "Matte Black", "Olive Green", "White / Navy"). Max 30 characters.
-6. "material": The apparent fabric or texture ONLY if discernible (e.g. "Linen", "Denim", "Silk", "Leather", "Cotton Knit", "Wool Blend"). If uncertain, return null.
-7. "gender": Exactly one of: "WOMEN", "MEN", "UNISEX", "KIDS".
-8. "style": Fashion aesthetic (e.g. "Minimalist", "Oversized", "Casual", "Tailored", "Streetwear", "Elegant", "Vintage"). If uncertain, return null.
-9. "occasion": Typical occasion (e.g. "Casual", "Business", "Evening", "Formal", "Sport"). If uncertain, return null.
-10. "season": Appropriate season (e.g. "Summer", "Winter", "Spring", "Autumn", "All Season"). If uncertain, return null.
-11. "tags": An array of 4 to 8 concise, lowercase keywords (e.g. ["linen", "blazer", "beige", "summer", "chic"]).
+${langInstructions}
+
+CRITICAL MACHINE-FACING FIELDS (DO NOT TRANSLATE):
+- "category": Primary fashion category suggestion MUST ALWAYS BE IN ENGLISH to match the system taxonomy. Suggest one of: "Blazers & Jackets", "Dresses", "Tops & Blouses", "T-Shirts", "Shirts", "Sweaters & Knitwear", "Hoodies & Sweatshirts", "Coats & Outerwear", "Pants & Trousers", "Jeans", "Skirts", "Shorts", "Suits", "Sneakers", "Shoes & Boots", "Heels", "Bags & Handbags", "Accessories". NEVER translate the category name.
+- "gender": Exactly one of: "WOMEN", "MEN", "UNISEX", "KIDS". NEVER translate this value.
+- "brand": The brand name ONLY if a logo or brand label is clearly visible and readable in the photo. If not visible, return null. Never guess.
 
 Return strictly raw JSON with no markdown formatting or commentary.`;
+}
 
 /**
  * Structured JSON Schema for Gemini generateContent responseSchema.
@@ -187,18 +231,18 @@ export function validateVisionAnalysisResult(raw: unknown): VisionAnalysisResult
   const occasion = sanitizeNullableString(obj.occasion, 50);
   const season = sanitizeNullableString(obj.season, 50);
 
-  // 7. Tags validation
+  // 7. Tags validation (Unicode-safe: preserves all letters, digits, underscores, and hyphens)
   let tags: string[] = [];
   if (Array.isArray(obj.tags)) {
     tags = obj.tags
-      .map((t) => sanitizeString(t, 30).toLowerCase().replace(/[^a-z0-9_-]/g, ''))
+      .map((t) => sanitizeString(t, 30).toLowerCase().replace(/[^\p{L}\p{N}_-]/gu, ''))
       .filter((t) => t.length >= 2 && t.length <= 30)
       .slice(0, 10);
   }
   if (tags.length === 0) {
     tags = [
-      category.toLowerCase().replace(/[^a-z0-9_-]/g, ''),
-      color.toLowerCase().replace(/[^a-z0-9_-]/g, ''),
+      category.toLowerCase().replace(/[^\p{L}\p{N}_-]/gu, ''),
+      color.toLowerCase().replace(/[^\p{L}\p{N}_-]/gu, ''),
     ].filter(Boolean);
   }
 
@@ -235,7 +279,8 @@ export function validateVisionAnalysisResult(raw: unknown): VisionAnalysisResult
  */
 export async function analyzeClothingImage(
   imageBufferOrBase64: Buffer | string,
-  mimeType = 'image/jpeg'
+  mimeType = 'image/jpeg',
+  language: SupportedBotLanguage = 'uz'
 ): Promise<VisionAnalysisResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -261,6 +306,7 @@ export async function analyzeClothingImage(
 
   const base64Payload = buffer.toString('base64');
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+  const systemPrompt = getSystemPrompt(language);
 
   let response: Response;
   try {
@@ -272,7 +318,7 @@ export async function analyzeClothingImage(
         contents: [
           {
             parts: [
-              { text: SYSTEM_PROMPT },
+              { text: systemPrompt },
               {
                 inline_data: {
                   mime_type: mimeType,
