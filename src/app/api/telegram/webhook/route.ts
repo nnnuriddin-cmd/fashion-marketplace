@@ -18,6 +18,8 @@ import {
   getTelegramText,
 } from '@/lib/telegram/product-draft';
 
+export const preferredRegion = 'bom1';
+
 /**
  * Resolves language for a Telegram user with the following priority:
  * 1. Saved explicit seller preference: auth.users.user_metadata.preferred_language (uz | ru | en)
