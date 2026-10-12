@@ -856,7 +856,8 @@ export async function getAdminPlatformMetrics(): Promise<AdminPlatformMetrics> {
 }
 
 export async function getAdminStoresList(): Promise<AdminStoreListItem[]> {
-  const { data, error } = await supabase
+  const adminDb = getServerSupabase();
+  const { data, error } = await adminDb
     .from('stores')
     .select(`
       *,

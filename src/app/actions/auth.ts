@@ -135,7 +135,7 @@ export async function signUpAction(prevState: { error?: string } | null, formDat
       return { error: 'Failed to create user profile. Please try again.' };
     }
 
-    // 3. For SELLER, create store with unique deterministic slug and status = PENDING
+    // 3. For SELLER, create store with unique deterministic slug and status = APPROVED
     if (validatedRole === 'SELLER') {
       let baseSlug = storeName
         .toLowerCase()
@@ -168,7 +168,7 @@ export async function signUpAction(prevState: { error?: string } | null, formDat
           description: storeDescription,
           city: city,
           phone: phone,
-          status: 'PENDING',
+          status: 'APPROVED',
         });
 
       if (storeError) {

@@ -128,7 +128,7 @@ export function RegisterForm({ initialRole }: RegisterFormProps) {
           <h2 className="text-2xl font-serif font-bold text-neutral-900">
             {t('auth.sellerSuccessTitle')}
           </h2>
-          <div className="inline-block bg-amber-100 text-amber-900 text-xs font-bold px-3 py-1 rounded-full">
+          <div className="inline-block bg-emerald-100 text-emerald-900 text-xs font-bold px-3 py-1 rounded-full">
             {t('auth.sellerSuccessPending')}
           </div>
           <p className="text-xs text-neutral-600 leading-relaxed pt-2">

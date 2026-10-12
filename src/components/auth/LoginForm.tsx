@@ -3,7 +3,7 @@
 import React, { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { signInAction } from '@/app/actions/auth';
-import { LogIn, Lock, Mail, AlertCircle, KeyRound, ArrowRight } from 'lucide-react';
+import { LogIn, Lock, Mail, AlertCircle, ArrowRight } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/translations';
 
 export function LoginForm() {
@@ -27,12 +27,6 @@ export function LoginForm() {
         setError(res.error);
       }
     });
-  };
-
-  const handleQuickFill = (demoEmail: string, demoPass: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
-    setError(null);
   };
 
   return (
@@ -65,7 +59,7 @@ export function LoginForm() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="anora@gmail.com"
+            placeholder="name@example.com"
             className="w-full px-3.5 py-2 text-xs border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900"
           />
         </div>
@@ -112,40 +106,6 @@ export function LoginForm() {
           <span>{t('auth.registerHere')}</span>
           <ArrowRight className="w-3 h-3" />
         </Link>
-      </div>
-
-      {/* Quick Test Accounts */}
-      <div className="pt-2 border-t border-neutral-100 space-y-2">
-        <div className="text-[11px] font-semibold text-neutral-400 uppercase tracking-wider flex items-center gap-1">
-          <KeyRound className="w-3 h-3" />
-          <span>{t('auth.quickDemo')}</span>
-        </div>
-        <div className="grid grid-cols-3 gap-1.5 text-[10px]">
-          <button
-            type="button"
-            onClick={() => handleQuickFill('anora@gmail.com', 'customer123')}
-            className="px-2 py-1.5 bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 rounded-lg text-neutral-700 font-medium text-center truncate"
-            title="Customer: anora@gmail.com"
-          >
-            Customer
-          </button>
-          <button
-            type="button"
-            onClick={() => handleQuickFill('seller1@trendmall.uz', 'seller123')}
-            className="px-2 py-1.5 bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 rounded-lg text-neutral-700 font-medium text-center truncate"
-            title="Seller: seller1@trendmall.uz"
-          >
-            Seller 1
-          </button>
-          <button
-            type="button"
-            onClick={() => handleQuickFill('admin@trendmall.uz', 'admin123')}
-            className="px-2 py-1.5 bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 rounded-lg text-neutral-700 font-medium text-center truncate"
-            title="Admin: admin@trendmall.uz"
-          >
-            Admin
-          </button>
-        </div>
       </div>
     </div>
   );
