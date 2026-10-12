@@ -544,6 +544,7 @@ export async function getAdminPlatformMetricsServer(): Promise<AdminPlatformMetr
     pendingStoresRes,
     productsRes,
     ordersRes,
+    usersRes,
     gmvRes,
     commissionRes,
   ] = await Promise.all([
@@ -551,6 +552,7 @@ export async function getAdminPlatformMetricsServer(): Promise<AdminPlatformMetr
     serverSupabase.from('stores').select('*', { count: 'exact', head: true }).eq('status', 'PENDING'),
     serverSupabase.from('products').select('*', { count: 'exact', head: true }).eq('status', 'ACTIVE'),
     serverSupabase.from('parent_orders').select('*', { count: 'exact', head: true }),
+    serverSupabase.from('users').select('*', { count: 'exact', head: true }),
     serverSupabase.from('parent_orders').select('total_amount'),
     serverSupabase.from('seller_orders').select('commission_amount'),
   ]);
@@ -563,8 +565,40 @@ export async function getAdminPlatformMetricsServer(): Promise<AdminPlatformMetr
     pendingStoresCount: pendingStoresRes.count || 0,
     productsCount: productsRes.count || 0,
     ordersCount: ordersRes.count || 0,
+    usersCount: usersRes.count || 0,
     gmv,
     totalCommission,
   };
+}
+
+export interface AdminUserListItem {
+  id: string;
+  email: string;
+  full_name: string;
+  phone: string | null;
+  role: 'ADMIN' | 'SELLER' | 'CUSTOMER' | string;
+  telegram_id: string | null;
+  created_at: string;
+}
+
+/**
+ * Retrieves all registered users across the platform strictly for administrators.
+ * Gated by assertAdminRole() and uses server-side service role privileges.
+ */
+export async function getAdminUsersListServer(): Promise<AdminUserListItem[]> {
+  await assertAdminRole();
+
+  const serverSupabase = getServerSupabase();
+  const { data, error } = await serverSupabase
+    .from('users')
+    .select('id, email, full_name, phone, role, telegram_id, created_at')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Failed to retrieve users list for admin dashboard:', error);
+    throw error;
+  }
+
+  return (data || []) as AdminUserListItem[];
 }
 

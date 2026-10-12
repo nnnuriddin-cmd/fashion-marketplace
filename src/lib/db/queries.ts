@@ -818,6 +818,7 @@ export interface AdminPlatformMetrics {
   ordersCount: number;
   gmv: number;
   totalCommission: number;
+  usersCount?: number;
 }
 
 export interface AdminStoreListItem extends StoreRow {

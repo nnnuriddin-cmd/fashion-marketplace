@@ -277,6 +277,12 @@ export function validateVisionAnalysisResult(raw: unknown): VisionAnalysisResult
  * - Enforces a 15-second request timeout.
  * - Validates output with strict schema rules.
  */
+const FALLBACK_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-3.6-flash',
+  'gemini-1.5-flash',
+];
+
 export async function analyzeClothingImage(
   imageBufferOrBase64: Buffer | string,
   mimeType = 'image/jpeg',
@@ -305,93 +311,117 @@ export async function analyzeClothingImage(
   }
 
   const base64Payload = buffer.toString('base64');
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
   const systemPrompt = getSystemPrompt(language);
 
-  let response: Response;
-  try {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(15000), // 15-second timeout
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: systemPrompt },
-              {
-                inline_data: {
-                  mime_type: mimeType,
-                  data: base64Payload,
+  let lastError: Error | null = null;
+
+  for (const model of FALLBACK_MODELS) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(15000), // 15-second timeout
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: systemPrompt },
+                {
+                  inline_data: {
+                    mime_type: mimeType,
+                    data: base64Payload,
+                  },
                 },
-              },
-            ],
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            topK: 32,
+            topP: 0.95,
+            maxOutputTokens: 2048,
+            responseMimeType: 'application/json',
+            responseSchema: VISION_ANALYSIS_SCHEMA,
           },
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          topK: 32,
-          topP: 0.95,
-          maxOutputTokens: 2048,
-          responseMimeType: 'application/json',
-          responseSchema: VISION_ANALYSIS_SCHEMA,
-        },
-      }),
-    });
-  } catch (fetchErr: any) {
-    if (fetchErr?.name === 'TimeoutError' || fetchErr?.name === 'AbortError') {
-      throw new Error('Gemini Vision analysis timed out after 15 seconds');
+        }),
+      });
+    } catch (fetchErr: any) {
+      const isTimeout = fetchErr?.name === 'TimeoutError' || fetchErr?.name === 'AbortError';
+      lastError = new Error(
+        isTimeout
+          ? `Gemini Vision analysis with model ${model} timed out after 15 seconds`
+          : `Failed to connect to Gemini API (${model}): ${fetchErr?.message || fetchErr}`
+      );
+      console.warn(`[Gemini Vision] ${model} network error, trying fallback if available:`, lastError.message);
+      continue;
     }
-    throw new Error(`Failed to connect to Gemini API: ${fetchErr?.message || fetchErr}`);
-  }
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    throw new Error(`Gemini API error (HTTP ${response.status}): ${errText.slice(0, 200)}`);
-  }
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      lastError = new Error(`Gemini API error for ${model} (HTTP ${response.status}): ${errText.slice(0, 200)}`);
 
-  const data = await response.json();
-  const candidate = data?.candidates?.[0];
+      // If model is overloaded (503, 429) or transient server error (500, 502, 504), fail over to next model
+      if ([503, 429, 500, 502, 504].includes(response.status)) {
+        console.warn(`[Gemini Vision] ${model} unavailable (HTTP ${response.status}). Failing over to next model...`);
+        continue;
+      }
 
-  // Collect text across all parts if available
-  const parts = candidate?.content?.parts;
-  let rawText = '';
-  if (Array.isArray(parts)) {
-    rawText = parts
-      .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
-      .join('');
-  } else if (typeof candidate?.content?.parts?.[0]?.text === 'string') {
-    rawText = candidate.content.parts[0].text;
-  }
-
-  const trimmed = rawText.trim();
-
-  if (!trimmed) {
-    const finishReason = candidate?.finishReason || 'UNKNOWN';
-    throw new Error(`Gemini Vision produced no text output (finishReason: ${finishReason})`);
-  }
-
-  let cleanJson = trimmed;
-
-  if (cleanJson.startsWith('```')) {
-    cleanJson = cleanJson
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/i, '')
-      .trim();
-  } else {
-    const codeBlockMatch = cleanJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-    if (codeBlockMatch && codeBlockMatch[1]) {
-      cleanJson = codeBlockMatch[1].trim();
+      // If it's another client error (like 400 Bad Request, invalid key), trying another model won't help
+      throw lastError;
     }
+
+    const data = await response.json();
+    const candidate = data?.candidates?.[0];
+
+    // Collect text across all parts if available
+    const parts = candidate?.content?.parts;
+    let rawText = '';
+    if (Array.isArray(parts)) {
+      rawText = parts
+        .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
+        .join('');
+    } else if (typeof candidate?.content?.parts?.[0]?.text === 'string') {
+      rawText = candidate.content.parts[0].text;
+    }
+
+    const trimmed = rawText.trim();
+
+    if (!trimmed) {
+      const finishReason = candidate?.finishReason || 'UNKNOWN';
+      lastError = new Error(`Gemini Vision (${model}) produced no text output (finishReason: ${finishReason})`);
+      console.warn(`[Gemini Vision] ${model} produced empty text, trying fallback...`);
+      continue;
+    }
+
+    let cleanJson = trimmed;
+
+    if (cleanJson.startsWith('```')) {
+      cleanJson = cleanJson
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+    } else {
+      const codeBlockMatch = cleanJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      if (codeBlockMatch && codeBlockMatch[1]) {
+        cleanJson = codeBlockMatch[1].trim();
+      }
+    }
+
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(cleanJson);
+    } catch {
+      lastError = new Error(`Gemini Vision (${model}) returned invalid JSON format`);
+      console.warn(`[Gemini Vision] ${model} returned malformed JSON, trying fallback...`);
+      continue;
+    }
+
+    return validateVisionAnalysisResult(parsedJson);
   }
 
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(cleanJson);
-  } catch {
-    throw new Error('Gemini Vision returned invalid JSON format');
-  }
-
-  return validateVisionAnalysisResult(parsedJson);
+  throw lastError || new Error('All Gemini Vision models failed to process image');
 }
 

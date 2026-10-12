@@ -6,12 +6,15 @@ import {
   getAdminPlatformMetricsServer,
   getAdminStoresList,
   getAdminRecentOrders,
+  getAdminUsersListServer,
   AdminPlatformMetrics,
   AdminStoreListItem,
+  AdminUserListItem,
   AdminOrderDetails,
 } from '@/lib/db';
 import AdminStoreApprover from '@/components/admin/AdminStoreApprover';
 import AdminOrderList from '@/components/admin/AdminOrderList';
+import AdminUserList from '@/components/admin/AdminUserList';
 import { ShieldCheck, Store, ShoppingBag, Package, DollarSign, Users, Sparkles, CheckCircle, AlertCircle } from 'lucide-react';
 
 export const revalidate = 0;
@@ -26,23 +29,26 @@ export default async function AdminDashboardPage() {
   // NEVER trusts role from query params, request body, client state, or localStorage.
   const profile = await requireRole(['ADMIN'], '/account', '/');
 
-  // 2. Fetch admin metrics, stores, and orders strictly via server-only DB layer functions.
+  // 2. Fetch admin metrics, stores, users, and orders strictly via server-only DB layer functions.
   // We do NOT substitute fake zeros if data loading fails.
   let metrics: AdminPlatformMetrics | null = null;
   let allStores: AdminStoreListItem[] = [];
+  let allUsers: AdminUserListItem[] = [];
   let recentOrders: AdminOrderDetails[] = [];
   let totalOrdersCount = 0;
   let loadError: string | null = null;
 
   try {
-    const [platformMetrics, storesList, ordersResult] = await Promise.all([
+    const [platformMetrics, storesList, ordersResult, usersList] = await Promise.all([
       getAdminPlatformMetricsServer(),
       getAdminStoresList(),
       getAdminRecentOrders({ limit: 50 }),
+      getAdminUsersListServer(),
     ]);
 
     metrics = platformMetrics;
     allStores = storesList;
+    allUsers = usersList;
     recentOrders = ordersResult.orders;
     totalOrdersCount = ordersResult.totalCount;
   } catch (err) {
@@ -107,7 +113,7 @@ export default async function AdminDashboardPage() {
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-neutral-200 space-y-1 shadow-sm">
           <div className="text-xs font-semibold text-neutral-500 flex items-center justify-between">
             <span>Marketplace GMV</span>
@@ -126,7 +132,7 @@ export default async function AdminDashboardPage() {
 
         <div className="bg-white p-5 rounded-2xl border border-neutral-200 space-y-1 shadow-sm">
           <div className="text-xs font-semibold text-neutral-500 flex items-center justify-between">
-            <span>Active Sellers & Stores</span>
+            <span>Active Stores</span>
             <Store className="w-4 h-4 text-sky-600" />
           </div>
           <div className="text-xl font-bold text-neutral-900">{metrics.storesCount} Stores</div>
@@ -137,15 +143,26 @@ export default async function AdminDashboardPage() {
 
         <div className="bg-white p-5 rounded-2xl border border-neutral-200 space-y-1 shadow-sm">
           <div className="text-xs font-semibold text-neutral-500 flex items-center justify-between">
-            <span>Total Catalog Products</span>
+            <span>Catalog Products</span>
             <ShoppingBag className="w-4 h-4 text-purple-600" />
           </div>
           <div className="text-xl font-bold text-neutral-900">{metrics.productsCount} Products</div>
+        </div>
+
+        <div className="bg-white p-5 rounded-2xl border border-neutral-200 space-y-1 shadow-sm col-span-2 sm:col-span-1">
+          <div className="text-xs font-semibold text-neutral-500 flex items-center justify-between">
+            <span>Registered Users</span>
+            <Users className="w-4 h-4 text-indigo-600" />
+          </div>
+          <div className="text-xl font-bold text-neutral-900">{metrics.usersCount || allUsers.length} Users</div>
         </div>
       </div>
 
       {/* Seller Approval & Management Section */}
       <AdminStoreApprover initialStores={initialStoresForApprover} />
+
+      {/* Registered Users Management Section */}
+      <AdminUserList initialUsers={allUsers} />
 
       {/* All Marketplace Parent Orders */}
       <AdminOrderList
