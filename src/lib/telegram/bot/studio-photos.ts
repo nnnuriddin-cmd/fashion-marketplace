@@ -259,8 +259,16 @@ export function triggerStudioPhotoJob(job: StudioPhotoJob, supabase: SupabaseCli
   waitUntil(run().catch((err) => console.error('[Studio photo] job failed:', err)));
 }
 
+/**
+ * Mannequin photos are switched off by default (white background only).
+ * Set AI_MANNEQUIN_ENABLED=true to bring them back for clothing.
+ */
+function isMannequinEnabled(): boolean {
+  return process.env.AI_MANNEQUIN_ENABLED?.trim().toLowerCase() === 'true';
+}
+
 function kindsForCategory(categoryName: string | null | undefined): StudioPhotoKind[] {
-  return isApparelCategory(categoryName) ? ['white', 'mannequin'] : ['white'];
+  return isMannequinEnabled() && isApparelCategory(categoryName) ? ['white', 'mannequin'] : ['white'];
 }
 
 /** Called right after a draft is created: checks the daily limit and starts one job per photo kind. */
