@@ -16,6 +16,14 @@ export function isOpenAiImageConfigured(): boolean {
   return Boolean(process.env.OPENAI_API_KEY);
 }
 
+/** Error from the image API; `transient` means a retry may succeed (overload, rate limit, network). */
+export class OpenAiImageError extends Error {
+  constructor(message: string, readonly transient: boolean, readonly timedOut = false) {
+    super(message);
+    this.name = 'OpenAiImageError';
+  }
+}
+
 /** Returns the edited image as JPEG bytes. Throws on any failure. */
 export async function editImageWithOpenAi(params: {
   image: Buffer;
@@ -57,22 +65,30 @@ export async function editImageWithOpenAi(params: {
     });
   } catch (err: any) {
     const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
-    throw new Error(
+    throw new OpenAiImageError(
       isTimeout
         ? `OpenAI image edit timed out after ${Math.round(params.timeoutMs / 1000)}s`
-        : `Failed to connect to OpenAI API: ${err?.message || err}`
+        : `Failed to connect to OpenAI API: ${err?.message || err}`,
+      !isTimeout,
+      isTimeout
     );
   }
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`OpenAI image edit error for ${model} (HTTP ${res.status}): ${errText.slice(0, 300)}`);
+    // 429 "insufficient_quota" is a billing problem, retrying will not help
+    const transient =
+      [500, 502, 503, 504].includes(res.status) || (res.status === 429 && !errText.includes('insufficient_quota'));
+    throw new OpenAiImageError(
+      `OpenAI image edit error for ${model} (HTTP ${res.status}): ${errText.slice(0, 300)}`,
+      transient
+    );
   }
 
   const data = await res.json();
   const b64 = data?.data?.[0]?.b64_json;
   if (typeof b64 !== 'string' || !b64) {
-    throw new Error(`OpenAI image edit (${model}) returned no image`);
+    throw new OpenAiImageError(`OpenAI image edit (${model}) returned no image`, true);
   }
   if (data?.usage) {
     console.log(`[OpenAI Image] ${model} usage: in=${data.usage.input_tokens} out=${data.usage.output_tokens}`);

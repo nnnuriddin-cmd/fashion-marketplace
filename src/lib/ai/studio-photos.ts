@@ -2,7 +2,7 @@ import 'server-only';
 import sharp from 'sharp';
 import { getServerSupabase } from '@/lib/supabase-server';
 import { STORAGE_BUCKET } from './image-processor';
-import { editImageWithOpenAi, isOpenAiImageConfigured } from './providers/openai-image';
+import { editImageWithOpenAi, isOpenAiImageConfigured, OpenAiImageError } from './providers/openai-image';
 
 /**
  * AI "studio" photos for products:
@@ -27,8 +27,8 @@ export interface StudioPhotoResult {
   jpeg: Buffer;
 }
 
-/** Must leave room for download/upload inside the 60s background function. */
-const GENERATION_TIMEOUT_MS = 45000;
+/** Time budget for one photo job (download + generation + upload) inside the 60s function. */
+export const STUDIO_JOB_BUDGET_MS = 54000;
 const OUTPUT_SIZE = 1000;
 
 const PRESERVE_RULES =
@@ -229,19 +229,65 @@ export async function toModelInput(source: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-async function generateOne(
+
+/** Retry once only if at least this much time is left in the job's budget. */
+const MIN_RETRY_BUDGET_MS = 25000;
+
+function buildPrompt(
   kind: StudioPhotoKind,
   input: Buffer,
-  storeId: string,
   jobId: string,
-  mannequinPrompt: string
-): Promise<StudioPhotoResult> {
-  const generated = await editImageWithOpenAi({
-    image: input,
-    imageMimeType: 'image/png',
-    prompt: kind === 'white' ? WHITE_PROMPT : mannequinPrompt,
-    timeoutMs: GENERATION_TIMEOUT_MS,
+  categoryName?: string | null,
+  gender?: string | null
+): Promise<string> {
+  if (kind === 'white') return Promise.resolve(WHITE_PROMPT);
+  return detectGarmentTone(input).then((tone) => {
+    const framing = framingForCategory(categoryName);
+    const body = bodyForGender(gender);
+    console.log(`[Studio photo] job ${jobId}: mannequin tone=${tone} framing=${framing} body=${body}`);
+    return buildMannequinPrompt({ tone, framing, body });
   });
+}
+
+/**
+ * Generates ONE studio photo (white or mannequin) and stores it.
+ * Retries once on a transient OpenAI error if enough of the time budget is left.
+ * Throws if it could not be generated.
+ */
+export async function generateStudioPhoto(params: {
+  source: Buffer;
+  storeId: string;
+  jobId: string;
+  kind: StudioPhotoKind;
+  /** Product category (decides knee-length vs full-length framing) */
+  categoryName?: string | null;
+  /** WOMEN | MEN | KIDS | UNISEX (decides the mannequin body) */
+  gender?: string | null;
+  /** Absolute time (ms since epoch) by which generation must finish */
+  deadline: number;
+}): Promise<StudioPhotoResult> {
+  const { kind } = params;
+  const input = await toModelInput(params.source);
+  const prompt = await buildPrompt(kind, input, params.jobId, params.categoryName, params.gender);
+
+  let generated: Buffer | null = null;
+  for (let attempt = 1; attempt <= 2 && !generated; attempt++) {
+    const timeoutMs = params.deadline - Date.now();
+    if (timeoutMs < 5000) throw new Error(`No time left to generate ${kind} photo`);
+    try {
+      generated = await editImageWithOpenAi({ image: input, imageMimeType: 'image/png', prompt, timeoutMs });
+    } catch (err) {
+      const retryable =
+        attempt === 1 &&
+        err instanceof OpenAiImageError &&
+        err.transient &&
+        params.deadline - Date.now() >= MIN_RETRY_BUDGET_MS;
+      console.warn(`[Studio photo] ${kind} attempt ${attempt} failed${retryable ? ', retrying' : ''}:`, (err as Error).message);
+      if (!retryable) throw err;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+  if (!generated) throw new Error(`Could not generate ${kind} photo`);
 
   const padColor = kind === 'white' ? '#ffffff' : '#eeebe7';
   const normalized = sharp(generated)
@@ -252,7 +298,7 @@ async function generateOne(
     normalized.clone().jpeg({ quality: 88 }).toBuffer(),
   ]);
 
-  const storagePath = `${usageFolder(storeId)}/${safeSegment(jobId)}-${kind}.webp`;
+  const storagePath = `${usageFolder(params.storeId)}/${safeSegment(params.jobId)}-${kind}.webp`;
   const supabase = getServerSupabase();
   const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(storagePath, webp, {
     contentType: 'image/webp',
@@ -263,38 +309,4 @@ async function generateOne(
 
   const { data: { publicUrl } } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
   return { kind, publicUrl, jpeg };
-}
-
-/**
- * Generates the requested studio photos in parallel.
- * Returns the ones that succeeded (failures are logged, never thrown).
- */
-export async function generateStudioPhotos(params: {
-  source: Buffer;
-  storeId: string;
-  jobId: string;
-  kinds: StudioPhotoKind[];
-  /** Product category (decides knee-length vs full-length framing) */
-  categoryName?: string | null;
-  /** WOMEN | MEN | KIDS | UNISEX (decides the mannequin body) */
-  gender?: string | null;
-}): Promise<StudioPhotoResult[]> {
-  const input = await toModelInput(params.source);
-  let mannequinPrompt = '';
-  if (params.kinds.includes('mannequin')) {
-    const tone = await detectGarmentTone(input);
-    const framing = framingForCategory(params.categoryName);
-    const body = bodyForGender(params.gender);
-    mannequinPrompt = buildMannequinPrompt({ tone, framing, body });
-    console.log(`[Studio photo] job ${params.jobId}: mannequin tone=${tone} framing=${framing} body=${body}`);
-  }
-  const results = await Promise.allSettled(
-    params.kinds.map((kind) => generateOne(kind, input, params.storeId, params.jobId, mannequinPrompt))
-  );
-  const ok: StudioPhotoResult[] = [];
-  results.forEach((r, i) => {
-    if (r.status === 'fulfilled') ok.push(r.value);
-    else console.warn(`[Studio photo] ${params.kinds[i]} failed:`, r.reason?.message || r.reason);
-  });
-  return ok;
 }

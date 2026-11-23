@@ -20,15 +20,18 @@ function isAuthorized(request: NextRequest): boolean {
 }
 
 function parseJob(body: any): StudioPhotoJob | null {
+  const kind = body?.kind;
+  if (kind !== 'white' && kind !== 'mannequin') return null;
   if (body?.type === 'draft' && typeof body.sessionId === 'string' && UUID_RE.test(body.sessionId)) {
-    return { type: 'draft', sessionId: body.sessionId };
+    return { type: 'draft', sessionId: body.sessionId, kind };
   }
   if (
     body?.type === 'product' &&
     typeof body.productId === 'string' && UUID_RE.test(body.productId) &&
+    typeof body.jobId === 'string' && UUID_RE.test(body.jobId) &&
     typeof body.chatId === 'string' && /^-?\d+$/.test(body.chatId)
   ) {
-    return { type: 'product', productId: body.productId, chatId: body.chatId };
+    return { type: 'product', productId: body.productId, chatId: body.chatId, jobId: body.jobId, kind };
   }
   return null;
 }

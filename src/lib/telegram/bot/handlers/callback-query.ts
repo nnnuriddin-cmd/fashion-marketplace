@@ -319,7 +319,10 @@ async function handlePublish(ctx: CallbackContext) {
   }
 
   // Photos: the seller's choice of AI studio photos (white / mannequin / both), or the original
-  const studio: StudioCandidates = draft.ai_photos?.status === 'done' ? draft.ai_photos : {};
+  const studio: StudioCandidates = {
+    white: draft.ai_photos?.white || null,
+    mannequin: draft.ai_photos?.mannequin || null,
+  };
   const productImages = resolveChosenImages(draft.photo_choice, studio, imageUrl);
 
   const title = ai.title || 'Fashion Item';
@@ -353,6 +356,18 @@ async function handlePublish(ctx: CallbackContext) {
         publishedVia: 'TELEGRAM_BOT',
         ...(studio.white || studio.mannequin
           ? { ai_photo_candidates: { white: studio.white || null, mannequin: studio.mannequin || null } }
+          : {}),
+        // Lets photos that finish after publishing (and their retries) land on this product
+        ...(draft.ai_photos?.kinds
+          ? {
+              ai_photo_job: {
+                id: sessionId,
+                kinds: draft.ai_photos.kinds,
+                status: draft.ai_photos.status || {},
+                retries: draft.ai_photos.retries || {},
+                choice_msg_id: null,
+              },
+            }
           : {}),
       },
       status: 'ACTIVE',
