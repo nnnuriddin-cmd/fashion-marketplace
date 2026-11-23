@@ -33,6 +33,11 @@ import {
 import type { BotLang, SellerContext, TelegramSession } from '../types';
 import { handleProductCallback } from './my-products';
 import {
+  StudioCandidates,
+  handleStudioPhotoCallback,
+  resolveChosenImages,
+} from '../studio-photos';
+import {
   DRAFT_CANCELLED,
   LANGUAGE_SELECTOR_KEYBOARD,
   Localized,
@@ -94,6 +99,7 @@ export async function handleCallbackQuery(supabase: SupabaseClient, cb: any) {
     isPhotoMessage: Array.isArray(cb.message?.photo) && cb.message.photo.length > 0,
   };
 
+  if (await handleStudioPhotoCallback(ctx)) return;
   if (await handleProductCallback(ctx)) return;
   if (data.startsWith('cancel_')) return handleCancel(ctx);
   if (data.startsWith('set_price_')) return handleSetPrice(ctx);
@@ -312,6 +318,10 @@ async function handlePublish(ctx: CallbackContext) {
     return;
   }
 
+  // Photos: the seller's choice of AI studio photos (white / mannequin / both), or the original
+  const studio: StudioCandidates = draft.ai_photos?.status === 'done' ? draft.ai_photos : {};
+  const productImages = resolveChosenImages(draft.photo_choice, studio, imageUrl);
+
   const title = ai.title || 'Fashion Item';
   const { data: newProduct, error: insertErr } = await supabase
     .from('products')
@@ -335,12 +345,15 @@ async function handlePublish(ctx: CallbackContext) {
       season: ai.season || null,
       tags: Array.isArray(ai.tags) ? ai.tags : [],
       original_image: imageUrl,
-      processed_images: [imageUrl],
+      processed_images: productImages,
       ai_metadata: {
         ...ai,
         telegram_session_id: sessionId,
         studioProcessed: true,
         publishedVia: 'TELEGRAM_BOT',
+        ...(studio.white || studio.mannequin
+          ? { ai_photo_candidates: { white: studio.white || null, mannequin: studio.mannequin || null } }
+          : {}),
       },
       status: 'ACTIVE',
     })

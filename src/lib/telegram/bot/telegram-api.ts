@@ -89,6 +89,31 @@ export async function sendTelegramPhoto(
   return Boolean(data?.ok);
 }
 
+/** Sends several photos as one album (no keyboard possible on albums). */
+export async function sendTelegramMediaGroup(
+  chatId: string | number,
+  photos: Array<{ jpeg: Buffer; caption?: string }>
+): Promise<boolean> {
+  if (photos.length === 0) return true;
+  if (photos.length === 1) {
+    return sendTelegramPhoto(chatId, photos[0].jpeg, photos[0].caption || '');
+  }
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append(
+    'media',
+    JSON.stringify(
+      photos.map((p, i) => ({ type: 'photo', media: `attach://p${i}`, caption: p.caption || '', parse_mode: 'HTML' }))
+    )
+  );
+  photos.forEach((p, i) => {
+    form.append(`p${i}`, new Blob([new Uint8Array(p.jpeg)], { type: 'image/jpeg' }), `p${i}.jpg`);
+  });
+  const data = await callTelegram('sendMediaGroup', form, false);
+  if (!data?.ok) console.warn('sendMediaGroup rejected:', data?.description);
+  return Boolean(data?.ok);
+}
+
 /** Replaces the caption and keyboard of a photo message. */
 export async function editTelegramCaption(
   chatId: string | number,

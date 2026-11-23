@@ -24,6 +24,8 @@ import {
   sendTelegramPhoto,
 } from '../telegram-api';
 import { getProductPhotoUrl, loadProductPhotoJpeg } from '../product-photo';
+import { isAiPhotoEnabled } from '@/lib/ai/studio-photos';
+import { startProductStudioPhotos } from '../studio-photos';
 import type { BotLang, InlineButton, InlineKeyboard, SellerContext, TelegramSession } from '../types';
 import { Localized, SELLER_DASHBOARD_URL, SITE_URL, getLocalizedMenu } from '../ui';
 
@@ -87,6 +89,7 @@ const T = {
   btnHide: { uz: '🙈 Yashirish', ru: '🙈 Скрыть', en: '🙈 Hide' },
   btnShow: { uz: '✅ Faollashtirish', ru: '✅ Показать', en: '✅ Show' },
   btnOpenSite: { uz: "🔗 Saytda ko'rish", ru: '🔗 Открыть на сайте', en: '🔗 View on site' },
+  btnEnhance: { uz: '✨ Rasmni yaxshilash (AI)', ru: '✨ Улучшить фото (AI)', en: '✨ Enhance photo (AI)' },
   btnBack: { uz: "⬅️ Ro'yxatga qaytish", ru: '⬅️ К списку', en: '⬅️ Back to list' },
   btnCancel: { uz: '❌ Bekor qilish', ru: '❌ Отмена', en: '❌ Cancel' },
   notFound: { uz: 'Mahsulot topilmadi', ru: 'Товар не найден', en: 'Product not found' },
@@ -256,6 +259,9 @@ function buildCardView(product: ProductRow, page: number, lang: BotLang): Screen
         : { text: t('btnShow', lang), callback_data: `prod_toggle_${product.id}_${page}` },
     ],
   ];
+  if (isAiPhotoEnabled()) {
+    rows.push([{ text: t('btnEnhance', lang), callback_data: `prod_aiphoto_${product.id}` }]);
+  }
   if (isActive) {
     rows.push([{ text: t('btnOpenSite', lang), url: `${SITE_URL}/product/${encodeURIComponent(product.slug)}` }]);
   }
@@ -316,6 +322,18 @@ export async function handleProductCallback(ctx: ProductCallbackContext): Promis
     }
     await answerTelegramCallbackQuery(cbId, newStatus === 'ACTIVE' ? t('shownAlert', lang) : t('hiddenAlert', lang));
     await render(ctx, fromCallback(ctx), buildCardView({ ...product, status: newStatus }, Number(m[2]), lang));
+    return true;
+  }
+
+  // prod_aiphoto_<id>: generate AI studio photos for an existing product
+  m = data.match(/^prod_aiphoto_([0-9a-f-]{36})$/i);
+  if (m) {
+    const product = await fetchOwnProduct(ctx, m[1]);
+    if (!product) {
+      await answerTelegramCallbackQuery(cbId, t('notFound', lang), true);
+      return true;
+    }
+    await startProductStudioPhotos(ctx, product.id, cbId);
     return true;
   }
 

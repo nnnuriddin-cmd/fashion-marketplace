@@ -8,6 +8,7 @@ import { processAndStoreProductImage } from '@/lib/ai/image-processor';
 import { analyzeClothingImage, VisionAnalysisResult } from '@/lib/ai/vision-analyzer';
 import { getTelegramText, matchBrand, matchCategory } from '@/lib/telegram/product-draft';
 import { createSession, deleteSellerSessions } from '../sessions';
+import { startDraftStudioPhotos } from '../studio-photos';
 import { downloadTelegramFile, sendTelegramChatAction } from '../telegram-api';
 import type { SellerContext } from '../types';
 import { Localized, buildPriceStepPromptAndKeyboard, cancelButtonRow } from '../ui';
@@ -128,6 +129,7 @@ export async function handlePhotoUpload(ctx: SellerContext, photoSizes: any[]) {
       lang
     );
     await sendTelegramMessage(chatId, promptText, keyboard);
+    await startDraftStudioPhotos(ctx, sessionId);
     return;
   }
 
@@ -155,4 +157,5 @@ export async function handlePhotoUpload(ctx: SellerContext, photoSizes: any[]) {
     `❓ <b>${getTelegramText(lang, 'choose_category_prompt')}</b>`,
     { inline_keyboard: inlineCatButtons }
   );
+  await startDraftStudioPhotos(ctx, sessionId);
 }

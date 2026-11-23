@@ -68,18 +68,27 @@ export async function deleteSession(supabase: SupabaseClient, sessionId: string)
   await supabase.from('telegram_sessions').delete().eq('id', sessionId);
 }
 
-/** Moves a session to a new step, merging `draftPatch` into its draft. */
+/**
+ * Moves a session to a new step, merging `draftPatch` into its draft.
+ * The draft is re-read right before writing so fields written meanwhile by the
+ * background studio-photo job (ai_photos, photo_choice) are not lost.
+ */
 export async function advanceSession(
   supabase: SupabaseClient,
   session: TelegramSession,
   step: SessionStep,
   draftPatch: Record<string, unknown>
 ) {
+  const { data: latest } = await supabase
+    .from('telegram_sessions')
+    .select('draft')
+    .eq('id', session.id)
+    .maybeSingle();
   await supabase
     .from('telegram_sessions')
     .update({
       step,
-      draft: { ...(session.draft || {}), ...draftPatch },
+      draft: { ...(latest?.draft || session.draft || {}), ...draftPatch },
       updated_at: new Date().toISOString(),
     })
     .eq('id', session.id);

@@ -1,12 +1,9 @@
 import sharp from 'sharp';
 
 /**
- * Loads a product image for a Telegram card and converts it to JPEG.
- * Product images are stored as WebP, which Telegram does not reliably accept as a photo,
- * so they are re-encoded and uploaded as bytes.
- *
- * Only images from trusted hosts are fetched (our Supabase Storage and the demo image CDN).
- * Returns null on any problem so the caller can fall back to a text card.
+ * Loads product images for the bot.
+ * Only images from trusted hosts are fetched (our Supabase Storage and the demo image CDN),
+ * so a URL stored in the database can never make the server request arbitrary hosts.
  */
 const MAX_BYTES = 10 * 1024 * 1024;
 const CARD_PHOTO_SIZE = 800;
@@ -31,7 +28,8 @@ export function getProductPhotoUrl(product: {
   return first || product.original_image || null;
 }
 
-export async function loadProductPhotoJpeg(url: string | null): Promise<Buffer | null> {
+/** Downloads image bytes from a trusted host. Returns null on any problem. */
+export async function fetchTrustedImage(url: string | null | undefined): Promise<Buffer | null> {
   if (!url) return null;
   let parsed: URL;
   try {
@@ -46,6 +44,21 @@ export async function loadProductPhotoJpeg(url: string | null): Promise<Buffer |
     if (!res.ok) return null;
     const bytes = Buffer.from(await res.arrayBuffer());
     if (bytes.length === 0 || bytes.length > MAX_BYTES) return null;
+    return bytes;
+  } catch (err) {
+    console.warn('Could not download product image:', err);
+    return null;
+  }
+}
+
+/**
+ * Loads a product image for a Telegram card and converts it to JPEG.
+ * Product images are stored as WebP, which Telegram does not reliably accept as a photo.
+ */
+export async function loadProductPhotoJpeg(url: string | null): Promise<Buffer | null> {
+  const bytes = await fetchTrustedImage(url);
+  if (!bytes) return null;
+  try {
     return await sharp(bytes)
       .rotate()
       .resize(CARD_PHOTO_SIZE, CARD_PHOTO_SIZE, { fit: 'inside', withoutEnlargement: true })
@@ -53,7 +66,7 @@ export async function loadProductPhotoJpeg(url: string | null): Promise<Buffer |
       .jpeg({ quality: 85 })
       .toBuffer();
   } catch (err) {
-    console.warn('Could not load product photo for Telegram card:', err);
+    console.warn('Could not convert product photo for Telegram card:', err);
     return null;
   }
 }
