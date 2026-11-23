@@ -3,6 +3,8 @@ import { getServerSupabase } from '@/lib/supabase-server';
 import { handleTelegramUpdate } from '@/lib/telegram/bot';
 
 export const preferredRegion = 'bom1';
+// Photo flow = download + Sharp + AI analysis (up to ~35s budget): allow enough function time
+export const maxDuration = 60;
 
 /**
  * Telegram webhook endpoint. Verifies the secret token and hands the update

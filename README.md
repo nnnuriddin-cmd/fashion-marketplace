@@ -18,7 +18,7 @@ The core differentiator is an **AI-powered Telegram Seller Assistant**:
    - Single customer checkout supports items from multiple stores simultaneously.
    - Generates 1 `ParentOrder` (e.g. `ORD-10001`) and isolated `SellerOrder`s (`ORD-10001-A`, `ORD-10001-B`) with automated seller commission calculations.
 3. **AI Telegram Seller Assistant & Processing Pipeline**:
-   - Integrated with Gemini Vision AI + Sharp studio image processing.
+   - Integrated with OpenAI vision (Gemini as fallback) + Sharp studio image processing.
    - Isolates clothing item, places on standardized studio background (`1000x1000 square WebP format`).
    - Generates product title, category, gender, color, style, material, description, and search tags.
    - Interactive Telegram inline confirmation card: `[ 🚀 Publish Now ]`.
@@ -80,10 +80,12 @@ fashion-marketplace/
 
 ## 🔐 Environment Variables
 
-Create `.env.local` in root directory if connecting to live Telegram or Gemini endpoints:
+Create `.env.local` in root directory if connecting to live Telegram or AI endpoints:
 
 ```env
-# Optional Gemini API key for live vision AI extraction (Fallback smart vision engine active by default)
+# Vision AI for product photo analysis: OpenAI is primary, Gemini is an optional fallback
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_VISION_MODEL=gpt-5-mini
 GEMINI_API_KEY=your_gemini_api_key_here
 
 # Optional Telegram Bot Token (Simulated Telegram Webhook active by default)

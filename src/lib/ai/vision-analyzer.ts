@@ -1,4 +1,7 @@
 import 'server-only';
+import sharp from 'sharp';
+import { isOpenAiVisionConfigured, runOpenAiVision } from './providers/openai-vision';
+import { isGeminiVisionConfigured, runGeminiVision } from './providers/gemini-vision';
 
 export type SupportedBotLanguage = 'uz' | 'ru' | 'en';
 
@@ -18,7 +21,7 @@ export interface VisionAnalysisResult {
 }
 
 /**
- * Constructs a language-aware Gemini system prompt.
+ * Constructs a language-aware system prompt (shared by all vision providers).
  * Human-facing fields are generated in the requested language (uz, ru, en).
  * Machine-facing fields (category, gender) strictly remain in canonical English.
  */
@@ -73,83 +76,10 @@ CRITICAL MACHINE-FACING FIELDS (DO NOT TRANSLATE):
 - "category": Primary fashion category suggestion MUST ALWAYS BE IN ENGLISH to match the system taxonomy. Suggest one of: "Blazers & Jackets", "Dresses", "Tops & Blouses", "T-Shirts", "Shirts", "Sweaters & Knitwear", "Hoodies & Sweatshirts", "Coats & Outerwear", "Pants & Trousers", "Jeans", "Skirts", "Shorts", "Suits", "Sneakers", "Shoes & Boots", "Heels", "Bags & Handbags", "Accessories". NEVER translate the category name.
 - "gender": Exactly one of: "WOMEN", "MEN", "UNISEX", "KIDS". NEVER translate this value.
 - "brand": The brand name ONLY if a logo or brand label is clearly visible and readable in the photo. If not visible, return null. Never guess.
+- "suggestedPrice": Typical retail price of this item in Uzbekistan in UZS (Uzbek som) as a whole number, e.g. 350000. If you cannot estimate it reasonably, return null.
 
 Return strictly raw JSON with no markdown formatting or commentary.`;
 }
-
-/**
- * Structured JSON Schema for Gemini generateContent responseSchema.
- * Strictly mirrors VisionAnalysisResult attributes and adheres to Gemini REST schema specification.
- */
-const VISION_ANALYSIS_SCHEMA = {
-  type: 'OBJECT',
-  properties: {
-    title: {
-      type: 'STRING',
-      description: 'Concise fashion product title, 3-120 characters',
-    },
-    description: {
-      type: 'STRING',
-      description: 'Factual 2-3 sentence product description',
-    },
-    category: {
-      type: 'STRING',
-      description: 'Primary fashion category',
-    },
-    brand: {
-      type: 'STRING',
-      nullable: true,
-    },
-    color: {
-      type: 'STRING',
-      description: 'Dominant product color or colors',
-    },
-    material: {
-      type: 'STRING',
-      nullable: true,
-    },
-    gender: {
-      type: 'STRING',
-      enum: ['WOMEN', 'MEN', 'UNISEX', 'KIDS'],
-    },
-    style: {
-      type: 'STRING',
-      nullable: true,
-    },
-    occasion: {
-      type: 'STRING',
-      nullable: true,
-    },
-    season: {
-      type: 'STRING',
-      nullable: true,
-    },
-    tags: {
-      type: 'ARRAY',
-      items: {
-        type: 'STRING',
-      },
-    },
-    suggestedPrice: {
-      type: 'INTEGER',
-      nullable: true,
-    },
-  },
-  required: [
-    'title',
-    'description',
-    'category',
-    'brand',
-    'color',
-    'material',
-    'gender',
-    'style',
-    'occasion',
-    'season',
-    'tags',
-    'suggestedPrice',
-  ],
-};
 
 /**
  * Sanitizes a string by stripping HTML tags, control characters, and normalizing whitespace.
@@ -183,7 +113,7 @@ function sanitizeNullableString(val: unknown, maxLen: number): string | null {
 }
 
 /**
- * Strictly validates and normalizes the raw Gemini output against the schema.
+ * Strictly validates and normalizes the raw AI output against the schema.
  * Rejects unexpected types, excessively long strings, prompt injections, and malformed structures.
  */
 export function validateVisionAnalysisResult(raw: unknown): VisionAnalysisResult {
@@ -267,32 +197,47 @@ export function validateVisionAnalysisResult(raw: unknown): VisionAnalysisResult
   };
 }
 
+/** Total time budget for AI analysis across all providers (Telegram webhook must answer in time). */
+const ANALYSIS_TIME_BUDGET_MS = 35000;
+const OPENAI_TIMEOUT_MS = 20000;
+/** Longest side of the image sent to AI: smaller payload = cheaper and faster. */
+const AI_IMAGE_MAX_DIMENSION = 1024;
+
 /**
- * Analyzes a garment image buffer using Gemini Vision (gemini-3.6-flash).
- * Receives actual image bytes, validates output structure, and returns a sanitized result.
+ * Downscales the photo to at most 1024px (auto-oriented JPEG) before sending it to AI.
+ * Falls back to the original bytes if Sharp cannot process it.
+ */
+async function prepareImageForAi(buffer: Buffer, mimeType: string): Promise<{ base64: string; mimeType: string }> {
+  try {
+    const resized = await sharp(buffer)
+      .rotate()
+      .resize(AI_IMAGE_MAX_DIMENSION, AI_IMAGE_MAX_DIMENSION, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    return { base64: resized.toString('base64'), mimeType: 'image/jpeg' };
+  } catch (err) {
+    console.warn('[Vision] Could not downscale image, sending original:', err);
+    return { base64: buffer.toString('base64'), mimeType };
+  }
+}
+
+/**
+ * Analyzes a garment image and returns sanitized product attributes.
+ *
+ * Providers (in order, each only if its key is configured):
+ *   1. OpenAI (OPENAI_API_KEY, model OPENAI_VISION_MODEL) – primary
+ *   2. Gemini (GEMINI_API_KEY) – fallback
  *
  * Security:
- * - Uses server-side GEMINI_API_KEY only.
- * - Never passes Telegram Bot tokens or external URLs.
- * - Enforces a 15-second request timeout.
- * - Validates output with strict schema rules.
+ * - Server-side API keys only; never passes Telegram Bot tokens or external URLs.
+ * - Shared time budget across providers.
+ * - Every provider's output goes through strict validateVisionAnalysisResult().
  */
-const FALLBACK_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-3.6-flash',
-  'gemini-1.5-flash',
-];
-
 export async function analyzeClothingImage(
   imageBufferOrBase64: Buffer | string,
   mimeType = 'image/jpeg',
   language: SupportedBotLanguage = 'uz'
 ): Promise<VisionAnalysisResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY environment variable is not configured');
-  }
-
   let buffer: Buffer;
   if (Buffer.isBuffer(imageBufferOrBase64)) {
     buffer = imageBufferOrBase64;
@@ -300,128 +245,48 @@ export async function analyzeClothingImage(
     if (imageBufferOrBase64.startsWith('http://') || imageBufferOrBase64.startsWith('https://')) {
       throw new Error('Passing URLs to analyzeClothingImage is forbidden for security. Pass image Buffer.');
     }
-    const base64Data = imageBufferOrBase64.replace(/^data:image\/\w+;base64,/, '');
-    buffer = Buffer.from(base64Data, 'base64');
+    buffer = Buffer.from(imageBufferOrBase64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
   } else {
     throw new Error('Image data must be provided as a Buffer or base64 string');
   }
 
   if (buffer.length < 100) {
-    throw new Error('Invalid or empty image buffer provided to Gemini Vision');
+    throw new Error('Invalid or empty image buffer provided to vision analysis');
   }
 
-  const base64Payload = buffer.toString('base64');
-  const systemPrompt = getSystemPrompt(language);
+  const providers: Array<{ name: string; run: typeof runOpenAiVision; timeoutMs: number }> = [];
+  if (isOpenAiVisionConfigured()) providers.push({ name: 'OpenAI', run: runOpenAiVision, timeoutMs: OPENAI_TIMEOUT_MS });
+  if (isGeminiVisionConfigured()) providers.push({ name: 'Gemini', run: runGeminiVision, timeoutMs: ANALYSIS_TIME_BUDGET_MS });
 
+  if (providers.length === 0) {
+    throw new Error('No vision AI provider configured (set OPENAI_API_KEY or GEMINI_API_KEY)');
+  }
+
+  const image = await prepareImageForAi(buffer, mimeType);
+  const systemPrompt = getSystemPrompt(language);
+  const deadline = Date.now() + ANALYSIS_TIME_BUDGET_MS;
   let lastError: Error | null = null;
 
-  for (const model of FALLBACK_MODELS) {
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  for (const provider of providers) {
+    const timeoutMs = Math.min(provider.timeoutMs, deadline - Date.now());
+    if (timeoutMs < 3000) break;
 
-    let response: Response;
+    const startedAt = Date.now();
     try {
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(15000), // 15-second timeout
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: systemPrompt },
-                {
-                  inline_data: {
-                    mime_type: mimeType,
-                    data: base64Payload,
-                  },
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.2,
-            topK: 32,
-            topP: 0.95,
-            maxOutputTokens: 2048,
-            responseMimeType: 'application/json',
-            responseSchema: VISION_ANALYSIS_SCHEMA,
-          },
-        }),
+      const raw = await provider.run({
+        systemPrompt,
+        imageBase64: image.base64,
+        mimeType: image.mimeType,
+        timeoutMs,
       });
-    } catch (fetchErr: any) {
-      const isTimeout = fetchErr?.name === 'TimeoutError' || fetchErr?.name === 'AbortError';
-      lastError = new Error(
-        isTimeout
-          ? `Gemini Vision analysis with model ${model} timed out after 15 seconds`
-          : `Failed to connect to Gemini API (${model}): ${fetchErr?.message || fetchErr}`
-      );
-      console.warn(`[Gemini Vision] ${model} network error, trying fallback if available:`, lastError.message);
-      continue;
+      const result = validateVisionAnalysisResult(raw);
+      console.log(`[Vision] ${provider.name} analysis succeeded in ${Date.now() - startedAt}ms`);
+      return result;
+    } catch (err: any) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      console.warn(`[Vision] ${provider.name} failed after ${Date.now() - startedAt}ms:`, lastError.message);
     }
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      lastError = new Error(`Gemini API error for ${model} (HTTP ${response.status}): ${errText.slice(0, 200)}`);
-
-      // If model is overloaded (503, 429) or transient server error (500, 502, 504), fail over to next model
-      if ([503, 429, 500, 502, 504].includes(response.status)) {
-        console.warn(`[Gemini Vision] ${model} unavailable (HTTP ${response.status}). Failing over to next model...`);
-        continue;
-      }
-
-      // If it's another client error (like 400 Bad Request, invalid key), trying another model won't help
-      throw lastError;
-    }
-
-    const data = await response.json();
-    const candidate = data?.candidates?.[0];
-
-    // Collect text across all parts if available
-    const parts = candidate?.content?.parts;
-    let rawText = '';
-    if (Array.isArray(parts)) {
-      rawText = parts
-        .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
-        .join('');
-    } else if (typeof candidate?.content?.parts?.[0]?.text === 'string') {
-      rawText = candidate.content.parts[0].text;
-    }
-
-    const trimmed = rawText.trim();
-
-    if (!trimmed) {
-      const finishReason = candidate?.finishReason || 'UNKNOWN';
-      lastError = new Error(`Gemini Vision (${model}) produced no text output (finishReason: ${finishReason})`);
-      console.warn(`[Gemini Vision] ${model} produced empty text, trying fallback...`);
-      continue;
-    }
-
-    let cleanJson = trimmed;
-
-    if (cleanJson.startsWith('```')) {
-      cleanJson = cleanJson
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
-    } else {
-      const codeBlockMatch = cleanJson.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-      if (codeBlockMatch && codeBlockMatch[1]) {
-        cleanJson = codeBlockMatch[1].trim();
-      }
-    }
-
-    let parsedJson: unknown;
-    try {
-      parsedJson = JSON.parse(cleanJson);
-    } catch {
-      lastError = new Error(`Gemini Vision (${model}) returned invalid JSON format`);
-      console.warn(`[Gemini Vision] ${model} returned malformed JSON, trying fallback...`);
-      continue;
-    }
-
-    return validateVisionAnalysisResult(parsedJson);
   }
 
-  throw lastError || new Error('All Gemini Vision models failed to process image');
+  throw lastError || new Error('Vision analysis time budget exhausted');
 }
-
