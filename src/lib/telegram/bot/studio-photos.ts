@@ -262,7 +262,15 @@ async function runDraftJob(supabase: SupabaseClient, sessionId: string) {
 
   const categoryName = s.draft?.category_name || s.draft?.ai?.category || null;
   const kinds: StudioPhotoKind[] = isApparelCategory(categoryName) ? ['white', 'mannequin'] : ['white'];
-  const photos = await generateStudioPhotos({ source, storeId: s.store_id, jobId: sessionId, kinds });
+  const photos = await generateStudioPhotos({
+    source,
+    storeId: s.store_id,
+    jobId: sessionId,
+    kinds,
+    // English taxonomy name from AI is the most reliable for framing
+    categoryName: s.draft?.ai?.category || categoryName,
+    gender: s.draft?.ai?.gender || null,
+  });
 
   const candidates: StudioCandidates = {
     white: photos.find((p) => p.kind === 'white')?.publicUrl || null,
@@ -341,7 +349,7 @@ async function runProductJob(supabase: SupabaseClient, productId: string, chatId
   if (!store) return;
   const { data: product } = await supabase
     .from('products')
-    .select('id, title, original_image, processed_images, category_id, ai_metadata')
+    .select('id, title, original_image, processed_images, category_id, gender, ai_metadata')
     .eq('id', productId)
     .eq('store_id', store.id)
     .maybeSingle();
@@ -361,7 +369,14 @@ async function runProductJob(supabase: SupabaseClient, productId: string, chatId
   }
   const kinds: StudioPhotoKind[] = isApparelCategory(categoryName) ? ['white', 'mannequin'] : ['white'];
 
-  const photos = await generateStudioPhotos({ source, storeId: store.id, jobId: crypto.randomUUID(), kinds });
+  const photos = await generateStudioPhotos({
+    source,
+    storeId: store.id,
+    jobId: crypto.randomUUID(),
+    kinds,
+    categoryName,
+    gender: product.gender || product.ai_metadata?.gender || null,
+  });
   if (photos.length === 0) {
     await sendTelegramMessage(chatId, t('failed', lang));
     return;

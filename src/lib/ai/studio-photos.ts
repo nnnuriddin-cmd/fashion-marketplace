@@ -36,7 +36,7 @@ const PRESERVE_RULES =
   'logos, labels, buttons, zippers, stitching, pockets, collar, length, cut and proportions. ' +
   'Do not redesign, recolor, simplify or add any details. No text, no watermark, no extra items.';
 
-const WHITE_PROMPT =
+export const WHITE_PROMPT =
   'Create a professional e-commerce catalog photo of the product from the input image. ' +
   PRESERVE_RULES +
   ' Remove the original background, hanger, hands, people and surroundings completely. ' +
@@ -44,31 +44,76 @@ const WHITE_PROMPT =
   'even studio lighting and a subtle soft shadow. The product fills about 80% of the square frame.';
 
 /**
- * Garment tone decides the mannequin color so the two never blend:
+ * Garment tone decides the mannequin color so garment, mannequin and backdrop never blend:
  *   light / mid-tone garment → matte graphite mannequin
- *   dark garment             → natural beige linen tailor's form
+ *   dark garment             → matte warm stone-beige mannequin
  */
 export type GarmentTone = 'light' | 'dark';
 
-const MANNEQUIN_STYLE: Record<GarmentTone, { form: string; stand: string }> = {
-  light: { form: 'matte graphite-grey (#3A3A3C) dress form', stand: 'slim black metal' },
-  dark: { form: "natural beige linen-covered tailor's dress form", stand: 'slim light oak wood' },
+/** How much of the mannequin is shown, chosen from the product category. */
+export type MannequinFraming = 'knees' | 'full';
+
+export type MannequinBody = 'female' | 'male' | 'child';
+
+const MANNEQUIN_FINISH: Record<GarmentTone, string> = {
+  light: 'a smooth matte graphite-grey (#3A3A3C) finish',
+  dark: 'a smooth matte warm stone-beige (#CDBFAE) finish',
 };
 
-function mannequinPrompt(tone: GarmentTone): string {
-  const style = MANNEQUIN_STYLE[tone];
+const FRAMING_TEXT: Record<MannequinFraming, string> = {
+  knees:
+    'Frame the shot from the top of the head down to just below the knees, so the garment is large and ' +
+    'clearly visible; leave a small even margin above the head.',
+  full:
+    'Show the whole mannequin from head to feet with a small even margin, feet standing on the floor; ' +
+    'the garment is the clear focus of the image.',
+};
+
+const BODY_TEXT: Record<MannequinBody, string> = {
+  female: 'slim adult female',
+  male: 'athletic adult male',
+  child: 'child-size',
+};
+
+/** Tops and outerwear are framed to the knees; dresses, bottoms and sets in full length. */
+const KNEE_FRAMING_KEYWORDS = [
+  'blazer', 'jacket', 'coat', 'outerwear', 'top', 'blouse', 't-shirt', 'tee', 'shirt', 'sweater',
+  'knit', 'hoodie', 'sweatshirt', 'cardigan', 'vest',
+  'kurtka', 'palto', 'ko‘ylak', 'svitr', 'куртк', 'пальто', 'пиджак', 'рубашк', 'блуз', 'свитер', 'худи', 'футболк',
+];
+
+export function framingForCategory(categoryName: string | null | undefined): MannequinFraming {
+  const name = (categoryName || '').toLowerCase();
+  if (/dress|skirt|pant|trouser|jean|short|suit|jumpsuit|платье|юбк|брюк|джинс|костюм/.test(name)) return 'full';
+  return KNEE_FRAMING_KEYWORDS.some((k) => name.includes(k)) ? 'knees' : 'full';
+}
+
+export function bodyForGender(gender: string | null | undefined): MannequinBody {
+  const g = (gender || '').toUpperCase();
+  if (g === 'MEN') return 'male';
+  if (g === 'KIDS') return 'child';
+  return 'female';
+}
+
+export function buildMannequinPrompt(opts: {
+  tone: GarmentTone;
+  framing: MannequinFraming;
+  body: MannequinBody;
+}): string {
   return (
-    'Create a professional fashion boutique e-commerce photo of the garment from the input image ' +
-    `dressed on a ${style.form}. ` +
+    'Create a high-end fashion boutique e-commerce photo: the garment from the input image is worn by a ' +
+    `full-size realistic ${BODY_TEXT[opts.body]} display mannequin with ${MANNEQUIN_FINISH[opts.tone]}, ` +
+    'realistic human proportions, an abstract smooth egg-shaped head with no facial features and no hair, ' +
+    'standing straight in a natural relaxed pose with arms hanging relaxed along the body. ' +
     PRESERVE_RULES +
-    ' The mannequin is a headless torso form that ends at the hips (no legs, no face, no skin, no head), ' +
-    `mounted on a ${style.stand} stand with a small round base. ` +
-    'The garment fits the form naturally with realistic folds and drape, worn the same way as in the input ' +
-    '(same closures open or closed). ' +
-    'Background: seamless light warm grey studio backdrop (#EEEBE7), clearly different from the mannequin, ' +
-    'with a soft natural shadow on the floor under the stand so the mannequin looks grounded, not floating. ' +
-    'Soft even studio lighting, straight front view, centered; the whole mannequin, stand and base are visible ' +
-    'and the garment fills about 70-75% of the square frame.'
+    ' The garment is worn exactly like on a real person: shoulders and sleeves fully filled by the mannequin, ' +
+    'correct garment length relative to the body, realistic folds and drape, same closures open or closed as ' +
+    'in the input. The mannequin wears nothing else: no other clothing, no shoes, no jewelry; any visible legs ' +
+    'are bare mannequin legs in the same finish. No visible stand or pole. ' +
+    FRAMING_TEXT[opts.framing] +
+    ' Background: clean seamless light warm grey studio backdrop (#EEEBE7) with a soft natural contact shadow ' +
+    'on the floor. Soft, even, high-key studio lighting with gentle shadows, straight front view, centered, ' +
+    'sharp focus, photorealistic.'
   );
 }
 
@@ -175,7 +220,7 @@ export async function hasAiPhotoQuota(storeId: string): Promise<boolean> {
 }
 
 /** Prepares the source photo for the image model: PNG, max 1024px, white instead of transparency. */
-async function toModelInput(source: Buffer): Promise<Buffer> {
+export async function toModelInput(source: Buffer): Promise<Buffer> {
   return sharp(source)
     .rotate()
     .resize(1024, 1024, { fit: 'inside', withoutEnlargement: true })
@@ -189,12 +234,12 @@ async function generateOne(
   input: Buffer,
   storeId: string,
   jobId: string,
-  tone: GarmentTone
+  mannequinPrompt: string
 ): Promise<StudioPhotoResult> {
   const generated = await editImageWithOpenAi({
     image: input,
     imageMimeType: 'image/png',
-    prompt: kind === 'white' ? WHITE_PROMPT : mannequinPrompt(tone),
+    prompt: kind === 'white' ? WHITE_PROMPT : mannequinPrompt,
     timeoutMs: GENERATION_TIMEOUT_MS,
   });
 
@@ -229,14 +274,22 @@ export async function generateStudioPhotos(params: {
   storeId: string;
   jobId: string;
   kinds: StudioPhotoKind[];
+  /** Product category (decides knee-length vs full-length framing) */
+  categoryName?: string | null;
+  /** WOMEN | MEN | KIDS | UNISEX (decides the mannequin body) */
+  gender?: string | null;
 }): Promise<StudioPhotoResult[]> {
   const input = await toModelInput(params.source);
-  const tone = params.kinds.includes('mannequin') ? await detectGarmentTone(input) : 'light';
+  let mannequinPrompt = '';
   if (params.kinds.includes('mannequin')) {
-    console.log(`[Studio photo] job ${params.jobId}: garment tone ${tone} → ${MANNEQUIN_STYLE[tone].form}`);
+    const tone = await detectGarmentTone(input);
+    const framing = framingForCategory(params.categoryName);
+    const body = bodyForGender(params.gender);
+    mannequinPrompt = buildMannequinPrompt({ tone, framing, body });
+    console.log(`[Studio photo] job ${params.jobId}: mannequin tone=${tone} framing=${framing} body=${body}`);
   }
   const results = await Promise.allSettled(
-    params.kinds.map((kind) => generateOne(kind, input, params.storeId, params.jobId, tone))
+    params.kinds.map((kind) => generateOne(kind, input, params.storeId, params.jobId, mannequinPrompt))
   );
   const ok: StudioPhotoResult[] = [];
   results.forEach((r, i) => {
