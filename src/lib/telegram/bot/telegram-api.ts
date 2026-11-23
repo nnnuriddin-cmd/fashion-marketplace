@@ -55,6 +55,59 @@ export async function editTelegramMessage(
   }
 }
 
+async function callTelegram(method: string, body: BodyInit, json: boolean): Promise<any> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) return { ok: false };
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+      method: 'POST',
+      headers: json ? { 'Content-Type': 'application/json' } : undefined,
+      body,
+    });
+    return await res.json();
+  } catch (err) {
+    console.warn(`${method} failed:`, err);
+    return { ok: false };
+  }
+}
+
+/** Sends a photo (uploaded as bytes) with an HTML caption. Returns true on success. */
+export async function sendTelegramPhoto(
+  chatId: string | number,
+  photo: Buffer,
+  caption: string,
+  replyMarkup?: unknown
+): Promise<boolean> {
+  const form = new FormData();
+  form.append('chat_id', String(chatId));
+  form.append('photo', new Blob([new Uint8Array(photo)], { type: 'image/jpeg' }), 'product.jpg');
+  form.append('caption', caption);
+  form.append('parse_mode', 'HTML');
+  if (replyMarkup) form.append('reply_markup', JSON.stringify(replyMarkup));
+  const data = await callTelegram('sendPhoto', form, false);
+  if (!data?.ok) console.warn('sendPhoto rejected:', data?.description);
+  return Boolean(data?.ok);
+}
+
+/** Replaces the caption and keyboard of a photo message. */
+export async function editTelegramCaption(
+  chatId: string | number,
+  messageId: number,
+  caption: string,
+  replyMarkup?: unknown
+): Promise<boolean> {
+  const data = await callTelegram(
+    'editMessageCaption',
+    JSON.stringify({ chat_id: chatId, message_id: messageId, caption, parse_mode: 'HTML', reply_markup: replyMarkup }),
+    true
+  );
+  return Boolean(data?.ok) || String(data?.description || '').includes('message is not modified');
+}
+
+export async function deleteTelegramMessage(chatId: string | number, messageId: number): Promise<void> {
+  await callTelegram('deleteMessage', JSON.stringify({ chat_id: chatId, message_id: messageId }), true);
+}
+
 export type TelegramFileDownload =
   | { ok: true; buffer: Buffer }
   | { ok: false; reason: 'get_file_failed' | 'download_failed' };

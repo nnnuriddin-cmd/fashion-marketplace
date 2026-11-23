@@ -17,7 +17,13 @@ import {
 } from '@/lib/telegram/notifier';
 import { validatePriceInput, validateStockInput } from '@/lib/telegram/product-draft';
 import { createSession, deleteEditSessions, deleteSession } from '../sessions';
-import { editTelegramMessage } from '../telegram-api';
+import {
+  deleteTelegramMessage,
+  editTelegramCaption,
+  editTelegramMessage,
+  sendTelegramPhoto,
+} from '../telegram-api';
+import { getProductPhotoUrl, loadProductPhotoJpeg } from '../product-photo';
 import type { BotLang, InlineButton, InlineKeyboard, SellerContext, TelegramSession } from '../types';
 import { Localized, SELLER_DASHBOARD_URL, SITE_URL, getLocalizedMenu } from '../ui';
 
@@ -31,12 +37,25 @@ interface ProductRow {
   price: number | string;
   stock_quantity: number | null;
   status: string;
+  processed_images?: unknown;
+  original_image?: string | null;
 }
+
+const PRODUCT_COLUMNS = 'id, title, slug, price, stock_quantity, status, processed_images, original_image';
 
 interface ProductCallbackContext extends SellerContext {
   cbId: string;
   data: string;
   messageId?: number;
+  /** The pressed button belongs to a photo message (product card with image). */
+  isPhotoMessage?: boolean;
+}
+
+/** One bot "screen": text (or photo caption) + keyboard, optionally with a product photo. */
+interface Screen {
+  text: string;
+  keyboard: InlineKeyboard;
+  photoUrl?: string | null;
 }
 
 const T = {
@@ -110,18 +129,42 @@ async function fetchOwnProduct(ctx: SellerContext, productId: string): Promise<P
   if (!UUID_RE.test(productId)) return null;
   const { data } = await ctx.supabase
     .from('products')
-    .select('id, title, slug, price, stock_quantity, status')
+    .select(PRODUCT_COLUMNS)
     .eq('id', productId)
     .eq('store_id', ctx.store.id)
     .maybeSingle();
   return data;
 }
 
-/** Shows a message: edits the current bot message in place if possible, otherwise sends a new one. */
-async function show(ctx: SellerContext, messageId: number | undefined, text: string, keyboard: InlineKeyboard) {
-  if (messageId && (await editTelegramMessage(ctx.chatId, messageId, text, keyboard))) return;
-  await sendTelegramMessage(ctx.chatId, text, keyboard);
+/**
+ * Shows a screen, keeping the chat tidy:
+ * - same kind of message (text→text, photo→photo): edited in place;
+ * - different kind (list↔photo card): new message is sent, then the old one is deleted.
+ * A photo that cannot be loaded falls back to a text card.
+ */
+async function render(
+  ctx: SellerContext,
+  current: { messageId?: number; isPhoto?: boolean },
+  screen: Screen
+) {
+  const { chatId } = ctx;
+  const { messageId, isPhoto } = current;
+
+  if (screen.photoUrl) {
+    if (messageId && isPhoto && (await editTelegramCaption(chatId, messageId, screen.text, screen.keyboard))) return;
+    const photo = await loadProductPhotoJpeg(screen.photoUrl);
+    if (photo && (await sendTelegramPhoto(chatId, photo, screen.text, screen.keyboard))) {
+      if (messageId) await deleteTelegramMessage(chatId, messageId);
+      return;
+    }
+  }
+
+  if (messageId && !isPhoto && (await editTelegramMessage(chatId, messageId, screen.text, screen.keyboard))) return;
+  await sendTelegramMessage(chatId, screen.text, screen.keyboard);
+  if (messageId && isPhoto) await deleteTelegramMessage(chatId, messageId);
 }
+
+const fromCallback = (ctx: ProductCallbackContext) => ({ messageId: ctx.messageId, isPhoto: ctx.isPhotoMessage });
 
 // ---------------------------------------------------------------------------
 // List
@@ -148,7 +191,7 @@ async function buildListView(ctx: SellerContext, requestedPage: number) {
 
   const { data, error } = await supabase
     .from('products')
-    .select('id, title, slug, price, stock_quantity, status')
+    .select(PRODUCT_COLUMNS)
     .eq('store_id', store.id)
     .order('created_at', { ascending: false })
     .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
@@ -194,7 +237,7 @@ export async function handleMyProductsMenu(ctx: SellerContext) {
 // Product card
 // ---------------------------------------------------------------------------
 
-function buildCardView(product: ProductRow, page: number, lang: BotLang) {
+function buildCardView(product: ProductRow, page: number, lang: BotLang): Screen {
   const isActive = product.status === 'ACTIVE';
   const text =
     `🏷 <b>${escapeHtml(product.title)}</b>\n\n` +
@@ -219,7 +262,7 @@ function buildCardView(product: ProductRow, page: number, lang: BotLang) {
   rows.push([{ text: t('btnBack', lang), callback_data: `prod_list_${page}` }]);
   rows.push(dashboardRow(lang));
 
-  return { text, keyboard: { inline_keyboard: rows } };
+  return { text, keyboard: { inline_keyboard: rows }, photoUrl: getProductPhotoUrl(product) };
 }
 
 // ---------------------------------------------------------------------------
@@ -235,8 +278,7 @@ export async function handleProductCallback(ctx: ProductCallbackContext): Promis
   let m = data.match(/^prod_list_(\d+)$/);
   if (m) {
     await answerTelegramCallbackQuery(cbId);
-    const { text, keyboard } = await buildListView(ctx, Number(m[1]));
-    await show(ctx, ctx.messageId, text, keyboard);
+    await render(ctx, fromCallback(ctx), await buildListView(ctx, Number(m[1])));
     return true;
   }
 
@@ -249,8 +291,7 @@ export async function handleProductCallback(ctx: ProductCallbackContext): Promis
       return true;
     }
     await answerTelegramCallbackQuery(cbId);
-    const { text, keyboard } = buildCardView(product, Number(m[2]), lang);
-    await show(ctx, ctx.messageId, text, keyboard);
+    await render(ctx, fromCallback(ctx), buildCardView(product, Number(m[2]), lang));
     return true;
   }
 
@@ -274,8 +315,7 @@ export async function handleProductCallback(ctx: ProductCallbackContext): Promis
       return true;
     }
     await answerTelegramCallbackQuery(cbId, newStatus === 'ACTIVE' ? t('shownAlert', lang) : t('hiddenAlert', lang));
-    const { text, keyboard } = buildCardView({ ...product, status: newStatus }, Number(m[2]), lang);
-    await show(ctx, ctx.messageId, text, keyboard);
+    await render(ctx, fromCallback(ctx), buildCardView({ ...product, status: newStatus }, Number(m[2]), lang));
     return true;
   }
 
@@ -313,13 +353,10 @@ export async function handleProductCallback(ctx: ProductCallbackContext): Promis
   // prod_editcancel_<id>
   m = data.match(/^prod_editcancel_([0-9a-f-]{36})$/i);
   if (m) {
+    // The product card above the prompt is unchanged, so just remove the prompt
     await deleteEditSessions(ctx.supabase, ctx.chatId, ctx.store.id);
     await answerTelegramCallbackQuery(cbId, t('editCancelled', lang));
-    const product = await fetchOwnProduct(ctx, m[1]);
-    if (product) {
-      const { text, keyboard } = buildCardView(product, 0, lang);
-      await show(ctx, ctx.messageId, text, keyboard);
-    }
+    if (ctx.messageId) await deleteTelegramMessage(ctx.chatId, ctx.messageId);
     return true;
   }
 
@@ -375,6 +412,6 @@ export async function handleProductEditInput(ctx: SellerContext, session: Telegr
   }
 
   await deleteSession(supabase, session.id);
-  const { text: cardText, keyboard } = buildCardView({ ...product, ...update }, 0, lang);
-  await sendTelegramMessage(chatId, `${t(doneKey, lang)}\n\n${cardText}`, keyboard);
+  const card = buildCardView({ ...product, ...update }, 0, lang);
+  await render(ctx, {}, { ...card, text: `${t(doneKey, lang)}\n\n${card.text}` });
 }

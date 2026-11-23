@@ -47,6 +47,7 @@ interface CallbackContext extends SellerContext {
   cbId: string;
   data: string;
   messageId?: number;
+  isPhotoMessage?: boolean;
 }
 
 /** Removes the inline keyboard from the message the button belonged to. */
@@ -88,7 +89,10 @@ export async function handleCallbackQuery(supabase: SupabaseClient, cb: any) {
     return;
   }
 
-  const ctx: CallbackContext = { supabase, chatId, user, store, lang, cbId, data, messageId };
+  const ctx: CallbackContext = {
+    supabase, chatId, user, store, lang, cbId, data, messageId,
+    isPhotoMessage: Array.isArray(cb.message?.photo) && cb.message.photo.length > 0,
+  };
 
   if (await handleProductCallback(ctx)) return;
   if (data.startsWith('cancel_')) return handleCancel(ctx);

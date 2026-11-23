@@ -65,10 +65,15 @@ export function LoginForm() {
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
-            <Lock className="w-3.5 h-3.5 text-neutral-400" />
-            <span>{t('auth.password')}</span>
-          </label>
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-semibold text-neutral-700 flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-neutral-400" />
+              <span>{t('auth.password')}</span>
+            </label>
+            <Link href="/forgot-password" className="text-xs font-semibold text-amber-800 hover:underline">
+              {t('auth.forgotLink')}
+            </Link>
+          </div>
           <input
             type="password"
             required
