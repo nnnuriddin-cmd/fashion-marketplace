@@ -1,7 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { SessionStep, TelegramSession } from './types';
 
-/** Latest draft session of this seller in this store, or null. */
+const EDIT_STEPS = ['EDITING_PRICE', 'EDITING_STOCK'];
+
+/** Latest add-product draft session of this seller in this store (edit sessions excluded), or null. */
 export async function getLatestSession(
   supabase: SupabaseClient,
   chatId: string,
@@ -12,6 +14,25 @@ export async function getLatestSession(
     .select('*')
     .eq('seller_telegram_id', chatId)
     .eq('store_id', storeId)
+    .not('step', 'in', `(${EDIT_STEPS.join(',')})`)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as TelegramSession | null) ?? null;
+}
+
+/** Active product-edit session (price/stock edit from "My Products"), or null. */
+export async function getEditSession(
+  supabase: SupabaseClient,
+  chatId: string,
+  storeId: string
+): Promise<TelegramSession | null> {
+  const { data } = await supabase
+    .from('telegram_sessions')
+    .select('*')
+    .eq('seller_telegram_id', chatId)
+    .eq('store_id', storeId)
+    .in('step', EDIT_STEPS)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -31,6 +52,16 @@ export async function deleteSellerSessions(
     .eq('store_id', storeId)
     .select('id');
   return (data || []).map((row: { id: string }) => row.id);
+}
+
+/** Deletes only product-edit sessions (keeps an unfinished add-product draft intact). */
+export async function deleteEditSessions(supabase: SupabaseClient, chatId: string, storeId: string) {
+  await supabase
+    .from('telegram_sessions')
+    .delete()
+    .eq('seller_telegram_id', chatId)
+    .eq('store_id', storeId)
+    .in('step', EDIT_STEPS);
 }
 
 export async function deleteSession(supabase: SupabaseClient, sessionId: string) {

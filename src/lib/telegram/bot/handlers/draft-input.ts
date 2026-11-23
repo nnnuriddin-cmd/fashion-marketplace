@@ -7,7 +7,8 @@
 import { sendTelegramMessage } from '@/lib/telegram/notifier';
 import { matchCategory, validatePriceInput, validateStockInput } from '@/lib/telegram/product-draft';
 import { buildProductSlug, buildSku } from '../product';
-import { advanceSession, deleteSession, getLatestSession } from '../sessions';
+import { advanceSession, deleteSession, getEditSession, getLatestSession } from '../sessions';
+import { handleProductEditInput } from './my-products';
 import type { SellerContext, TelegramSession } from '../types';
 import {
   Localized,
@@ -18,6 +19,13 @@ import {
 
 /** Handles text for the active draft. Returns true if the message was handled. */
 export async function handleDraftInput(ctx: SellerContext, text: string): Promise<boolean> {
+  // A pending edit from "My Products" takes priority over an unfinished add-product draft
+  const editSession = text ? await getEditSession(ctx.supabase, ctx.chatId, ctx.store.id) : null;
+  if (editSession) {
+    await handleProductEditInput(ctx, editSession, text);
+    return true;
+  }
+
   const session = await getLatestSession(ctx.supabase, ctx.chatId, ctx.store.id);
   if (!session) return false;
 

@@ -31,6 +31,7 @@ import {
   getSessionAi,
 } from '../sessions';
 import type { BotLang, SellerContext, TelegramSession } from '../types';
+import { handleProductCallback } from './my-products';
 import {
   DRAFT_CANCELLED,
   LANGUAGE_SELECTOR_KEYBOARD,
@@ -89,6 +90,7 @@ export async function handleCallbackQuery(supabase: SupabaseClient, cb: any) {
 
   const ctx: CallbackContext = { supabase, chatId, user, store, lang, cbId, data, messageId };
 
+  if (await handleProductCallback(ctx)) return;
   if (data.startsWith('cancel_')) return handleCancel(ctx);
   if (data.startsWith('set_price_')) return handleSetPrice(ctx);
   if (data.startsWith('set_stock_')) return handleSetStock(ctx);

@@ -30,7 +30,9 @@ export type SessionStep =
   | 'AWAITING_PRICE'
   | 'AWAITING_STOCK'
   | 'AWAITING_PUBLICATION_CONFIRMATION'
-  | 'PUBLISHING';
+  | 'PUBLISHING'
+  | 'EDITING_PRICE'
+  | 'EDITING_STOCK';
 
 /** Row of the `telegram_sessions` table (draft is free-form JSON). */
 export interface TelegramSession {
@@ -46,6 +48,10 @@ export interface TelegramSession {
   updated_at: string;
 }
 
+export type InlineButton =
+  | { text: string; callback_data: string }
+  | { text: string; url: string };
+
 export interface InlineKeyboard {
-  inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+  inline_keyboard: InlineButton[][];
 }

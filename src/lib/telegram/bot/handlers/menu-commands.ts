@@ -5,6 +5,7 @@
 import crypto from 'crypto';
 import { sendTelegramMessage } from '@/lib/telegram/notifier';
 import { createSession, deleteSellerSessions } from '../sessions';
+import { handleMyProductsMenu } from './my-products';
 import type { SellerContext } from '../types';
 import {
   LANGUAGE_SELECTOR_KEYBOARD,
@@ -37,7 +38,7 @@ export async function handleMenuCommand(ctx: SellerContext, text: string): Promi
     text === '📦 Mahsulotlarim' ||
     matchesButton(text, MENU_LABELS.myProducts, ['my products', 'мои товары'])
   ) {
-    await handleMyProducts(ctx);
+    await handleMyProductsMenu(ctx);
     return true;
   }
   if (
@@ -97,21 +98,6 @@ async function handleAddProduct({ supabase, chatId, store, lang }: SellerContext
   await sendTelegramMessage(chatId, addProductPrompts[lang], {
     inline_keyboard: [cancelButtonRow(lang, freshSessionId)],
   });
-}
-
-async function handleMyProducts({ supabase, chatId, store, lang }: SellerContext) {
-  const { count, error } = await supabase
-    .from('products')
-    .select('*', { count: 'exact', head: true })
-    .eq('store_id', store.id);
-  if (error) throw error;
-
-  const inventoryMsgs: Localized = {
-    ru: `📦 Товаров в магазине <b>${store.name}</b>: <b>${count ?? 0}</b>`,
-    uz: `📦 <b>${store.name}</b> do'konidagi mahsulotlar: <b>${count ?? 0}</b>`,
-    en: `📦 Products in <b>${store.name}</b>: <b>${count ?? 0}</b>`,
-  };
-  await sendTelegramMessage(chatId, inventoryMsgs[lang], getLocalizedMenu(lang));
 }
 
 async function handleLanguageMenu({ chatId, lang }: SellerContext) {

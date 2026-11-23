@@ -21,6 +21,40 @@ export async function sendTelegramChatAction(chatId: string | number, action: st
   }
 }
 
+/**
+ * Replaces the text and inline keyboard of an existing bot message (in-place navigation).
+ * Returns false if Telegram refused (e.g. message too old), so the caller can send a new one.
+ */
+export async function editTelegramMessage(
+  chatId: string | number,
+  messageId: number,
+  text: string,
+  replyMarkup?: unknown
+): Promise<boolean> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/editMessageText`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: replyMarkup,
+      }),
+    });
+    const data = await res.json();
+    // "message is not modified" means the content is already up to date
+    return Boolean(data?.ok) || String(data?.description || '').includes('message is not modified');
+  } catch (err) {
+    console.warn('editMessageText failed:', err);
+    return false;
+  }
+}
+
 export type TelegramFileDownload =
   | { ok: true; buffer: Buffer }
   | { ok: false; reason: 'get_file_failed' | 'download_failed' };

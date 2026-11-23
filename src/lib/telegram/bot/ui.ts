@@ -11,6 +11,10 @@ import type { BotLang, InlineKeyboard, TelegramSession } from './types';
 
 export type Localized = Record<BotLang, string>;
 
+/** Public site base URL (used for links from the bot to the website). */
+export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://modora.uz').replace(/\/$/, '');
+export const SELLER_DASHBOARD_URL = `${SITE_URL}/seller/dashboard`;
+
 export const LANGUAGE_SELECTOR_KEYBOARD: InlineKeyboard = {
   inline_keyboard: [[
     { text: "🇺🇿 O‘zbekcha", callback_data: 'language_uz' },
