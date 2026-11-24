@@ -97,6 +97,11 @@ export default async function ProductDetailPage({ params }: ProductPageProps) {
     stockQuantity: rawProduct.stock_quantity ?? rawProduct.stockQuantity ?? 0,
     isFeatured: Boolean(rawProduct.is_featured ?? rawProduct.isFeatured),
     isTrending: Boolean(rawProduct.is_trending ?? rawProduct.isTrending),
+    // Photo of the product on a fictional AI model (other clothes on it are not for sale)
+    aiModelPhoto: (() => {
+      const url = rawProduct.ai_metadata?.ai_photo_candidates?.model;
+      return typeof url === 'string' && safeProcessedImages.includes(url) ? url : null;
+    })(),
   };
 
   let similarProducts: any[] = [];

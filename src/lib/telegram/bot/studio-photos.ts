@@ -36,6 +36,7 @@ import {
   StudioPhotoKind,
 } from '@/lib/ai/studio-photos';
 import { fetchSellerLanguage } from './language';
+import { patchJsonRow } from './sessions';
 import { fetchTrustedImage } from './product-photo';
 import { isTelegramApiUrl } from './product';
 import { deleteTelegramMessage, editTelegramMessage, sendTelegramPhoto } from './telegram-api';
@@ -70,7 +71,7 @@ export type StudioPhotoJob =
   | { type: 'product'; productId: string; chatId: string; jobId: string; kind: StudioPhotoKind };
 
 const MAX_RETRIES_PER_KIND = 2;
-const KIND_CODE: Record<StudioPhotoKind, KindCode> = { white: 'w', mannequin: 'm', model: 'h' };
+export const KIND_CODE: Record<StudioPhotoKind, KindCode> = { white: 'w', mannequin: 'm', model: 'h' };
 const CODE_KIND: Record<KindCode, StudioPhotoKind> = { w: 'white', m: 'mannequin', h: 'model' };
 
 const T = {
@@ -127,6 +128,11 @@ const T = {
   kindWhite: { uz: '🤍 Oq fon', ru: '🤍 Белый фон', en: '🤍 White background' },
   kindMannequin: { uz: '🧍 Maneken', ru: '🧍 Манекен', en: '🧍 Mannequin' },
   kindModel: { uz: '👤 Modelda', ru: '👤 На модели', en: '👤 On model' },
+  modelNote: {
+    uz: 'ℹ️ Faqat «{title}» sotiladi. Boshqa kiyim va poyabzal AI tomonidan qo‘shilgan.',
+    ru: 'ℹ️ Продаётся только «{title}». Остальная одежда и обувь добавлены AI.',
+    en: 'ℹ️ Only “{title}” is sold. Other clothing and shoes were added by AI.',
+  },
   btnModel: { uz: '👤 Modelda', ru: '👤 На модели', en: '👤 On model' },
   btnWhite: { uz: '🤍 Oq fon', ru: '🤍 Белый фон', en: '🤍 White' },
   btnMannequin: { uz: '🧍 Maneken', ru: '🧍 Манекен', en: '🧍 Mannequin' },
@@ -151,10 +157,18 @@ function t(key: keyof typeof T, lang: BotLang, vars: Record<string, string | num
 }
 
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const kindLabel = (kind: StudioPhotoKind, lang: BotLang) =>
+export const kindLabel = (kind: StudioPhotoKind, lang: BotLang) =>
   kind === 'white' ? t('kindWhite', lang) : kind === 'model' ? t('kindModel', lang) : t('kindMannequin', lang);
 
-function choiceLabel(choice: PhotoChoice, lang: BotLang): string {
+/** Caption under a generated photo; the AI-model photo says that only the product is sold. */
+function photoCaption(kind: StudioPhotoKind, lang: BotLang, title?: string | null): string {
+  if (kind !== 'model') return kindLabel(kind, lang);
+  const name = escapeHtml(String(title || '').trim()) || kindLabel(kind, lang);
+  return `${kindLabel(kind, lang)}
+${t('modelNote', lang, { title: name })}`;
+}
+
+export function choiceLabel(choice: PhotoChoice, lang: BotLang): string {
   return {
     w: t('btnWhite', lang),
     m: t('btnMannequin', lang),
@@ -165,7 +179,7 @@ function choiceLabel(choice: PhotoChoice, lang: BotLang): string {
 }
 
 /** Generated photos that exist, in display order. */
-const readyKinds = (c: StudioCandidates): StudioPhotoKind[] => KIND_ORDER.filter((k) => Boolean(c[k]));
+export const readyKinds = (c: StudioCandidates): StudioPhotoKind[] => KIND_ORDER.filter((k) => Boolean(c[k]));
 
 /** Choice keyboard; only offers options that exist. The current choice is marked with ✔️. */
 function buildChoiceKeyboard(prefix: string, c: StudioCandidates, lang: BotLang, selected?: PhotoChoice): InlineKeyboard {
@@ -204,45 +218,11 @@ function isValidChoice(choice: PhotoChoice, c: StudioCandidates): boolean {
   return Boolean(c[CODE_KIND[choice]]);
 }
 
-const candidatesOf = (s: StudioCandidates | null | undefined): StudioCandidates => ({
+export const candidatesOf = (s: StudioCandidates | null | undefined): StudioCandidates => ({
   white: s?.white || null,
   mannequin: s?.mannequin || null,
   model: s?.model || null,
 });
-
-// ---------------------------------------------------------------------------
-// Optimistic updates (two jobs may finish at the same time)
-// ---------------------------------------------------------------------------
-
-/**
- * Read-modify-write on a JSON column guarded by `updated_at`, retried on conflict.
- * Returns the new row value, or null if the row no longer exists (or mutate returned null).
- */
-async function patchJsonRow<T>(
-  supabase: SupabaseClient,
-  table: 'telegram_sessions' | 'products',
-  id: string,
-  column: 'draft' | 'ai_metadata',
-  mutate: (current: any, row: any) => T | null
-): Promise<T | null> {
-  const extra = table === 'telegram_sessions' ? ', step' : '';
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const { data: row } = await supabase.from(table).select(`${column}, updated_at${extra}`).eq('id', id).maybeSingle();
-    if (!row) return null;
-    const next = mutate((row as any)[column] || {}, row);
-    if (next === null) return null;
-    let query = supabase
-      .from(table)
-      .update({ [column]: next, updated_at: new Date(Date.now() + attempt).toISOString() })
-      .eq('id', id);
-    query = (row as any).updated_at ? query.eq('updated_at', (row as any).updated_at) : query;
-    const { data: updated } = await query.select('id');
-    if (updated && updated.length > 0) return next;
-    await new Promise((r) => setTimeout(r, 50 + Math.random() * 150));
-  }
-  console.warn(`[Studio photo] could not update ${table}.${column} for ${id} after retries`);
-  return null;
-}
 
 // ---------------------------------------------------------------------------
 // Starting jobs
@@ -320,7 +300,7 @@ export async function startDraftStudioPhotos(ctx: SellerContext, sessionId: stri
   });
   if (!state) return;
 
-  await sendTelegramMessage(ctx.chatId, t('preparing', ctx.lang));
+  // No separate message: the draft panel shows "⏳ being prepared"
   for (const kind of (state as any).ai_photos.kinds as StudioPhotoKind[]) {
     triggerStudioPhotoJob({ type: 'draft', sessionId, kind }, ctx.supabase);
   }
@@ -453,23 +433,13 @@ async function runDraftJob(supabase: SupabaseClient, sessionId: string, kind: St
 
   const state: StudioState = (draft as any).ai_photos;
   if (photo) {
-    await sendTelegramPhoto(chatId, photo.jpeg, kindLabel(kind, lang));
+    await sendTelegramPhoto(chatId, photo.jpeg, photoCaption(kind, lang, (draft as any).ai?.title));
   } else {
     await notifyFailure(chatId, lang, kind, `aiph_r_d_${sessionId}_${KIND_CODE[kind]}`, state.retries?.[kind] || 0);
   }
-  await refreshChoiceMessage(supabase, {
-    chatId,
-    lang,
-    state,
-    prefix: `aiph_d_${sessionId}`,
-    selected: (draft as any).photo_choice,
-    header: null,
-    saveMsgId: (msgId) =>
-      patchJsonRow(supabase, 'telegram_sessions', sessionId, 'draft', (d) => ({
-        ...d,
-        ai_photos: { ...(d.ai_photos || {}), choice_msg_id: msgId },
-      })),
-  });
+  // Fresh draft panel below the photo (loaded lazily: draft-panel imports this module)
+  const { sendDraftPanel } = await import('./draft-panel');
+  await sendDraftPanel(supabase, sessionId, chatId, lang);
 }
 
 async function runProductJob(
@@ -543,7 +513,7 @@ async function recordProductResult(
   const job: StudioState = (meta as any).ai_photo_job;
   const state: StudioState = { ...job, ...candidatesOf((meta as any).ai_photo_candidates) };
 
-  if (photo) await sendTelegramPhoto(chatId, photo.jpeg, kindLabel(kind, lang));
+  if (photo) await sendTelegramPhoto(chatId, photo.jpeg, photoCaption(kind, lang, product?.title));
   else await notifyFailure(chatId, lang, kind, `aiph_r_p_${productId}_${KIND_CODE[kind]}`, job.retries?.[kind] || 0);
 
   await refreshChoiceMessage(supabase, {
@@ -675,22 +645,8 @@ async function handleDraftChoice(ctx: ChoiceCallbackContext, sessionId: string, 
   }
 
   await answerTelegramCallbackQuery(cbId, choiceLabel(choice, lang));
-  if (ctx.messageId) {
-    const state: StudioState = (draft as any).ai_photos || {};
-    const pending = (state.kinds || []).filter((k) => state.status?.[k] === 'pending');
-    const head = pending.length
-      ? t('partlyReady', lang, {
-          done: (state.kinds || []).filter((k) => state.status?.[k] === 'done').map((k) => kindLabel(k, lang)).join(', '),
-          pending: pending.map((k) => kindLabel(k, lang)).join(', '),
-        })
-      : t('ready', lang);
-    await editTelegramMessage(
-      chatId,
-      ctx.messageId,
-      `${head}\n\n${t('chosen', lang, { choice: choiceLabel(choice, lang) })}`,
-      buildChoiceKeyboard(`aiph_d_${sessionId}`, candidatesOf(state), lang, choice)
-    );
-  }
+  const { sendDraftPanel } = await import('./draft-panel');
+  await sendDraftPanel(supabase, sessionId, chatId, lang, { editMessageId: ctx.messageId });
 }
 
 async function handleProductChoice(ctx: ChoiceCallbackContext, productId: string, choice: PhotoChoice) {

@@ -115,6 +115,115 @@ export function buildModelPrompt(opts: { body: 'female' | 'male' }): string {
   );
 }
 
+/**
+ * How the AI-model photo is cropped, so only the product is the focus:
+ *   top    – tops & outerwear: head to mid-thigh (no shoes, little of the trousers)
+ *   bottom – trousers, jeans, skirts, shorts: waist to feet
+ *   full   – dresses, jumpsuits, suits: whole figure
+ */
+export type ModelFraming = 'top' | 'bottom' | 'full';
+
+export function modelFramingForCategory(categoryName: string | null | undefined): ModelFraming {
+  const name = (categoryName || '').toLowerCase();
+  if (/dress|gown|jumpsuit|overall|suit|платье|костюм|комбинезон/.test(name)) return 'full';
+  if (/pant|trouser|jean|short|skirt|legging|брюк|джинс|юбк|шорт|shim|yubka/.test(name)) return 'bottom';
+  if (KNEE_FRAMING_KEYWORDS.some((k) => name.includes(k))) return 'top';
+  return 'full';
+}
+
+/**
+ * Finds the person on the light studio backdrop (bounding box of pixels that differ
+ * from the border color) and crops a square around the part that shows the product.
+ * Returns the input unchanged if the figure cannot be found reliably.
+ */
+export async function cropModelPhoto(image: Buffer, framing: ModelFraming): Promise<Buffer> {
+  if (framing === 'full') return image;
+  const meta = await sharp(image).metadata();
+  const W = meta.width || 0;
+  const H = meta.height || 0;
+  if (!W || !H) return image;
+
+  // Detect the figure on a small copy
+  const S = 200;
+  const { data } = await sharp(image).resize(S, S, { fit: 'fill' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const px = (x: number, y: number) => {
+    const i = (y * S + x) * 3;
+    return [data[i], data[i + 1], data[i + 2]];
+  };
+  const border: number[][] = [];
+  for (let i = 0; i < S; i++) border.push(px(i, 0), px(i, S - 1), px(0, i), px(S - 1, i));
+  const median = (v: number[]) => v.sort((a, b) => a - b)[Math.floor(v.length / 2)];
+  const bg = [0, 1, 2].map((c) => median(border.map((p) => p[c])));
+
+  const isFigure = (x: number, y: number) => {
+    const [r, g, b] = px(x, y);
+    return Math.abs(r - bg[0]) + Math.abs(g - bg[1]) + Math.abs(b - bg[2]) > 60;
+  };
+  const rowHits = new Array(S).fill(0);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (isFigure(x, y)) rowHits[y]++;
+  const minHits = 2;
+  const top = rowHits.findIndex((n) => n >= minHits);
+  const bottom = S - 1 - [...rowHits].reverse().findIndex((n) => n >= minHits);
+  if (top < 0 || bottom - top < S * 0.4) return image; // no clear full-body figure
+
+  // Back to full-size coordinates
+  const fy0 = (top / S) * H;
+  const fy1 = ((bottom + 1) / S) * H;
+  const fh = fy1 - fy0;
+
+  let y0: number;
+  let y1: number;
+  if (framing === 'top') {
+    y0 = fy0 - 0.04 * H;
+    y1 = fy0 + 0.6 * fh;
+  } else {
+    y0 = fy0 + 0.42 * fh;
+    y1 = fy1 + 0.03 * H;
+  }
+
+  // Horizontal center, taken from the torso (shoulders to hips): there the person is one wide
+  // blob, unlike the legs. For every torso row take the longest run of figure pixels that does
+  // not touch the image edge (edges are backdrop gradients), then the median of run centers.
+  const centers: number[] = [];
+  const ry0 = Math.max(0, Math.floor(top + 0.12 * (bottom - top)));
+  const ry1 = Math.min(S - 1, Math.ceil(top + 0.48 * (bottom - top)));
+  for (let y = ry0; y <= ry1; y++) {
+    let best: [number, number] | null = null;
+    let runStart = -1;
+    let lastHit = -10;
+    const closeRun = (end: number) => {
+      if (runStart < 0) return;
+      const touchesEdge = runStart === 0 || end === S - 1;
+      if (!touchesEdge && (!best || end - runStart > best[1] - best[0])) best = [runStart, end];
+      runStart = -1;
+    };
+    for (let x = 0; x < S; x++) {
+      if (!isFigure(x, y)) continue;
+      if (x - lastHit > 4) {
+        closeRun(lastHit);
+        runStart = x;
+      }
+      lastHit = x;
+    }
+    closeRun(lastHit);
+    if (best) centers.push((best[0] + best[1]) / 2);
+  }
+  if (centers.length === 0) return image;
+  centers.sort((a, b) => a - b);
+  const cx = ((centers[Math.floor(centers.length / 2)] + 0.5) / S) * W;
+
+  // Square crop, shifted to stay inside the photo (no padding bands)
+  const side = Math.min(Math.round(y1 - y0), W, H);
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const x0 = Math.round(clamp(cx - side / 2, 0, W - side));
+  const y0r = Math.round(clamp(y0, 0, H - side));
+
+  return sharp(image)
+    .extract({ left: x0, top: y0r, width: side, height: side })
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
 export function bodyForGender(gender: string | null | undefined): MannequinBody {
   const g = (gender || '').toUpperCase();
   if (g === 'MEN') return 'male';
@@ -320,6 +429,13 @@ export async function generateStudioPhoto(params: {
     }
   }
   if (!generated) throw new Error(`Could not generate ${kind} photo`);
+
+  // AI model: frame the shot around the product so added basics (trousers, shoes…) don't look like part of a set
+  if (kind === 'model') {
+    const framing = modelFramingForCategory(params.categoryName);
+    generated = await cropModelPhoto(generated, framing);
+    console.log(`[Studio photo] job ${params.jobId}: model framing=${framing}`);
+  }
 
   const padColor = kind === 'white' ? '#ffffff' : '#eeebe7';
   const normalized = sharp(generated)

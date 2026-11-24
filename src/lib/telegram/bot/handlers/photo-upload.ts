@@ -11,7 +11,8 @@ import { createSession, deleteSellerSessions } from '../sessions';
 import { startDraftStudioPhotos } from '../studio-photos';
 import { downloadTelegramFile, sendTelegramChatAction } from '../telegram-api';
 import type { SellerContext } from '../types';
-import { Localized, buildPriceStepPromptAndKeyboard, cancelButtonRow } from '../ui';
+import { Localized, cancelButtonRow } from '../ui';
+import { sendDraftPanel } from '../draft-panel';
 
 export async function handlePhotoUpload(ctx: SellerContext, photoSizes: any[]) {
   const { supabase, chatId, store, lang } = ctx;
@@ -112,24 +113,17 @@ export async function handlePhotoUpload(ctx: SellerContext, photoSizes: any[]) {
   };
 
   if (mappedCat) {
-    // Category matched: proceed to price step
+    // Category matched: show the draft panel (photo, description, price, stock, publish)
     const { error } = await createSession(supabase, {
       ...baseSession,
-      step: 'AWAITING_PRICE',
+      step: 'DRAFT',
       extractedMetadata: aiResult,
       draft: { ...aiDraft, category_id: mappedCat.categoryId, category_name: mappedCat.categoryName },
     });
     if (error) throw error;
 
-    const { promptText, keyboard } = buildPriceStepPromptAndKeyboard(
-      aiResult,
-      mappedCat.categoryName,
-      mappedBrand.brandName,
-      sessionId,
-      lang
-    );
-    await sendTelegramMessage(chatId, promptText, keyboard);
     await startDraftStudioPhotos(ctx, sessionId);
+    await sendDraftPanel(supabase, sessionId, chatId, lang);
     return;
   }
 
@@ -154,5 +148,5 @@ export async function handlePhotoUpload(ctx: SellerContext, photoSizes: any[]) {
     getTelegramText(lang, 'choose_category_prompt'),
     { inline_keyboard: inlineCatButtons }
   );
-  await startDraftStudioPhotos(ctx, sessionId);
+  // Studio photos and the draft panel start after the seller picks the category
 }

@@ -79,6 +79,7 @@ export const translations = {
 
     // Product Detail
     'product.studioProcessed': 'Studio orqali qayta ishlangan',
+    'product.aiModelNote': 'Foto AI-modelda. Boshqa kiyim va poyabzal sotilmaydi — sotuvda faqat:',
     'product.selectSize': 'O‘lchamni tanlang',
     'product.selectColor': 'Rangni tanlang',
     'product.quantity': 'Miqdor',
@@ -387,6 +388,7 @@ export const translations = {
 
     // Product Detail
     'product.studioProcessed': 'Обработано Studio AI',
+    'product.aiModelNote': 'Фото на AI-модели. Остальная одежда и обувь не продаются — в продаже только:',
     'product.selectSize': 'Выберите размер',
     'product.selectColor': 'Выберите цвет',
     'product.quantity': 'Количество',
@@ -695,6 +697,7 @@ export const translations = {
 
     // Product Detail
     'product.studioProcessed': 'Studio Processed',
+    'product.aiModelNote': 'Photo on an AI model. Other clothing and shoes are not for sale — only this item is sold:',
     'product.selectSize': 'Select Size',
     'product.selectColor': 'Select Color',
     'product.quantity': 'Quantity',

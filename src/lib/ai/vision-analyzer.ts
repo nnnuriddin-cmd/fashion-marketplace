@@ -76,7 +76,7 @@ CRITICAL MACHINE-FACING FIELDS (DO NOT TRANSLATE):
 - "category": Primary fashion category suggestion MUST ALWAYS BE IN ENGLISH to match the system taxonomy. Suggest one of: "Blazers & Jackets", "Dresses", "Tops & Blouses", "T-Shirts", "Shirts", "Sweaters & Knitwear", "Hoodies & Sweatshirts", "Coats & Outerwear", "Pants & Trousers", "Jeans", "Skirts", "Shorts", "Suits", "Sneakers", "Shoes & Boots", "Heels", "Bags & Handbags", "Accessories". NEVER translate the category name.
 - "gender": Exactly one of: "WOMEN", "MEN", "UNISEX", "KIDS". NEVER translate this value.
 - "brand": The brand name ONLY if a logo or brand label is clearly visible and readable in the photo. If not visible, return null. Never guess.
-- "suggestedPrice": Typical retail price of this item in Uzbekistan in UZS (Uzbek som) as a whole number, e.g. 350000. If you cannot estimate it reasonably, return null.
+- "suggestedPrice": Always return null (prices are set by the seller).
 
 Return strictly raw JSON with no markdown formatting or commentary.`;
 }
@@ -188,12 +188,8 @@ export function validateVisionAnalysisResult(raw: unknown): VisionAnalysisResult
     occasion,
     season,
     tags,
-    suggestedPrice:
-      typeof obj.suggestedPrice === 'number' &&
-      Number.isFinite(obj.suggestedPrice) &&
-      obj.suggestedPrice > 0
-        ? Math.round(obj.suggestedPrice)
-        : null,
+    // Prices are set by the seller only; AI price suggestions are intentionally ignored
+    suggestedPrice: null,
   };
 }
 

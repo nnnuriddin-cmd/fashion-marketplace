@@ -4,10 +4,11 @@
  * Callback data formats:
  *   language_<uz|ru|en>   – change bot language (works for unlinked users too)
  *   cancel_<sessionId>    – cancel the current product draft
- *   set_price_<price>     – accept AI-suggested price
- *   set_stock_<stock>     – quick stock selection
- *   select_cat_<catId>    – manual category selection
- *   publish_<sessionId>   – publish the draft as a product
+ *   drf_<d|p|s|b>_<id>    – draft panel: description / price / stock / back (see draft-panel.ts)
+ *   set_price_<price>     – legacy price button (old messages) → saves price, shows the panel
+ *   set_stock_<stock>     – quick stock selection → shows the panel
+ *   select_cat_<catId>    – manual category selection → shows the panel
+ *   publish_<sessionId>   – publish the draft (needs price and stock)
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -33,17 +34,23 @@ import {
 import type { BotLang, SellerContext, TelegramSession } from '../types';
 import { handleProductCallback } from './my-products';
 import {
+  askDraftField,
+  draftDescription,
+  isDraftComplete,
+  panelText,
+  saveDraftFieldAndShowPanel,
+  sendDraftPanel,
+} from '../draft-panel';
+import {
   StudioCandidates,
   handleStudioPhotoCallback,
   resolveChosenImages,
+  startDraftStudioPhotos,
 } from '../studio-photos';
 import {
   DRAFT_CANCELLED,
   LANGUAGE_SELECTOR_KEYBOARD,
   Localized,
-  buildPriceStepPromptAndKeyboard,
-  buildPublishPreviewAndKeyboard,
-  buildStockStepPromptAndKeyboard,
   getAccessDeniedMessage,
   getLocalizedMenu,
 } from '../ui';
@@ -102,6 +109,7 @@ export async function handleCallbackQuery(supabase: SupabaseClient, cb: any) {
   if (await handleStudioPhotoCallback(ctx)) return;
   if (await handleProductCallback(ctx)) return;
   if (data.startsWith('cancel_')) return handleCancel(ctx);
+  if (data.startsWith('drf_')) return handleDraftPanelButton(ctx);
   if (data.startsWith('set_price_')) return handleSetPrice(ctx);
   if (data.startsWith('set_stock_')) return handleSetStock(ctx);
   if (data.startsWith('select_cat_')) return handleSelectCategory(ctx);
@@ -177,11 +185,7 @@ async function handleSetPrice(ctx: CallbackContext) {
     getTelegramText(lang, 'alert_price_set', { price: priceRes.price.toLocaleString() })
   );
   await clearButtons(ctx);
-
-  await advanceSession(ctx.supabase, session, 'AWAITING_STOCK', { price: priceRes.price });
-
-  const { promptText, keyboard } = buildStockStepPromptAndKeyboard(priceRes.price, session.id, lang);
-  await sendTelegramMessage(ctx.chatId, promptText, keyboard);
+  await saveDraftFieldAndShowPanel(ctx.supabase, session.id, ctx.chatId, lang, { price: priceRes.price });
 }
 
 async function handleSetStock(ctx: CallbackContext) {
@@ -194,18 +198,14 @@ async function handleSetStock(ctx: CallbackContext) {
   }
 
   const session = await getLatestSession(ctx.supabase, ctx.chatId, ctx.store.id);
-  if (!session || !session.draft?.price) {
-    await answerTelegramCallbackQuery(ctx.cbId, getTelegramText(lang, 'alert_enter_price_first'), true);
+  if (!session) {
+    await answerTelegramCallbackQuery(ctx.cbId, getTelegramText(lang, 'alert_no_draft'), true);
     return;
   }
 
   await answerTelegramCallbackQuery(ctx.cbId, getTelegramText(lang, 'alert_stock_set', { stock: stockRes.stock }));
   await clearButtons(ctx);
-
-  await advanceSession(ctx.supabase, session, 'AWAITING_PUBLICATION_CONFIRMATION', { stock: stockRes.stock });
-
-  const { promptText, keyboard } = buildPublishPreviewAndKeyboard(session, stockRes.stock, lang);
-  await sendTelegramMessage(ctx.chatId, promptText, keyboard);
+  await saveDraftFieldAndShowPanel(ctx.supabase, session.id, ctx.chatId, lang, { stock: stockRes.stock });
 }
 
 async function handleSelectCategory(ctx: CallbackContext) {
@@ -231,24 +231,59 @@ async function handleSelectCategory(ctx: CallbackContext) {
   await answerTelegramCallbackQuery(ctx.cbId, `📁 ${cat.name}`);
   await clearButtons(ctx);
 
-  await advanceSession(ctx.supabase, session, 'AWAITING_PRICE', {
+  await advanceSession(ctx.supabase, session, 'DRAFT', {
     category_id: cat.id,
     category_name: cat.name,
   });
+  await startDraftStudioPhotos(ctx, session.id);
+  await sendDraftPanel(ctx.supabase, session.id, ctx.chatId, lang);
+}
 
-  const { promptText, keyboard } = buildPriceStepPromptAndKeyboard(
-    getSessionAi(session),
-    cat.name,
-    session.draft?.brand_name || null,
-    session.id,
-    lang
-  );
-  await sendTelegramMessage(ctx.chatId, promptText, keyboard);
+/** Draft panel buttons: drf_<d|p|s|b>_<sessionId> (description, price, stock, back). */
+async function handleDraftPanelButton(ctx: CallbackContext) {
+  const { supabase, chatId, store, lang, cbId } = ctx;
+  const m = ctx.data.match(/^drf_([dpsb])_([0-9a-f-]{36})$/i);
+  const { data: owned } = m
+    ? await supabase
+        .from('telegram_sessions')
+        .select('id, step')
+        .eq('id', m[2])
+        .eq('seller_telegram_id', chatId)
+        .eq('store_id', store.id)
+        .maybeSingle()
+    : { data: null };
+  if (!m || !owned || owned.step === 'PUBLISHING') {
+    await answerTelegramCallbackQuery(cbId, getTelegramText(lang, 'alert_session_expired'), true);
+    return;
+  }
+  const [, action, sessionId] = m;
+  await answerTelegramCallbackQuery(cbId);
+
+  if (action === 'b') {
+    // Back: leave the input step, remove the prompt; the panel is still above
+    await saveDraftFieldAndShowPanel(supabase, sessionId, chatId, lang, {});
+    return;
+  }
+  const field = action === 'd' ? 'description' : action === 'p' ? 'price' : 'stock';
+  await askDraftField(supabase, sessionId, chatId, lang, field);
 }
 
 async function handlePublish(ctx: CallbackContext) {
   const { supabase, chatId, store, lang, cbId } = ctx;
   const sessionId = ctx.data.replace('publish_', '');
+
+  // Price and stock must be filled in on the draft panel first
+  const { data: pending } = await supabase
+    .from('telegram_sessions')
+    .select('draft, step')
+    .eq('id', sessionId)
+    .eq('seller_telegram_id', chatId)
+    .eq('store_id', store.id)
+    .maybeSingle();
+  if (pending && pending.step !== 'PUBLISHING' && !isDraftComplete(pending.draft)) {
+    await answerTelegramCallbackQuery(cbId, panelText('missingFields', lang), true);
+    return;
+  }
 
   // Security check: Atomic lock on session to guarantee idempotency and prevent duplicate inserts
   const { data: lockedSession, error: lockErr } = await supabase
@@ -257,7 +292,7 @@ async function handlePublish(ctx: CallbackContext) {
     .eq('id', sessionId)
     .eq('seller_telegram_id', chatId)
     .eq('store_id', store.id)
-    .eq('step', 'AWAITING_PUBLICATION_CONFIRMATION')
+    .in('step', ['DRAFT', 'AWAITING_DESCRIPTION', 'AWAITING_PRICE', 'AWAITING_STOCK', 'AWAITING_PUBLICATION_CONFIRMATION'])
     .select('*')
     .maybeSingle();
 
@@ -300,7 +335,7 @@ async function handlePublish(ctx: CallbackContext) {
   const releaseLock = () =>
     supabase
       .from('telegram_sessions')
-      .update({ step: 'AWAITING_PUBLICATION_CONFIRMATION' })
+      .update({ step: 'DRAFT' })
       .eq('id', sessionId);
 
   if (!price || !stock || !categoryId || !imageUrl) {
@@ -336,7 +371,7 @@ async function handlePublish(ctx: CallbackContext) {
       brand_id: brandId,
       title,
       slug: buildProductSlug(title),
-      description: ai.description || '',
+      description: draftDescription(draft),
       price,
       currency: 'UZS',
       sku: buildSku(),

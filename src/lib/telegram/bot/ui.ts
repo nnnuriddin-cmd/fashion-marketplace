@@ -1,12 +1,8 @@
 /**
  * Localized messages and keyboards of the Telegram seller bot.
  */
-import {
-  formatProductPreview,
-  getTelegramText,
-} from '@/lib/telegram/product-draft';
-import { getSessionAi } from './sessions';
-import type { BotLang, InlineKeyboard, TelegramSession } from './types';
+import { getTelegramText } from '@/lib/telegram/product-draft';
+import type { BotLang, InlineKeyboard } from './types';
 
 export type Localized = Record<BotLang, string>;
 
@@ -77,102 +73,4 @@ export const DRAFT_CANCELLED: Localized = {
 
 export function cancelButtonRow(lang: BotLang, sessionId: string) {
   return [{ text: getTelegramText(lang, 'btn_cancel'), callback_data: `cancel_${sessionId}` }];
-}
-
-/**
- * Step 1 price prompt and inline keyboard.
- * The AI details (title, category, color, description…) are NOT shown in the chat anymore:
- * they are still generated and saved for the website, the seller only sets price and stock.
- * Only offers the "Use {price} UZS" button if suggestedPrice is an integer >= 1000.
- */
-export function buildPriceStepPromptAndKeyboard(
-  ai: any,
-  _categoryName: string,
-  _brandName: string | null,
-  sessionId: string,
-  lang: BotLang = 'uz'
-): { promptText: string; keyboard: InlineKeyboard } {
-  const suggestedPrice = ai?.suggestedPrice;
-  const hasValidSuggestedPrice =
-    typeof suggestedPrice === 'number' &&
-    Number.isInteger(suggestedPrice) &&
-    suggestedPrice >= 1000;
-
-  const baseCard = getTelegramText(lang, 'step1_header');
-
-  if (hasValidSuggestedPrice) {
-    const formattedPrice = suggestedPrice.toLocaleString();
-    return {
-      promptText: `${baseCard}\n\n${getTelegramText(lang, 'suggested_price_prompt', { price: formattedPrice })}`,
-      keyboard: {
-        inline_keyboard: [
-          [{ text: getTelegramText(lang, 'btn_use_price', { price: formattedPrice }), callback_data: `set_price_${suggestedPrice}` }],
-          cancelButtonRow(lang, sessionId),
-        ],
-      },
-    };
-  }
-
-  return {
-    promptText: `${baseCard}\n\n${getTelegramText(lang, 'enter_price_prompt')}`,
-    keyboard: { inline_keyboard: [cancelButtonRow(lang, sessionId)] },
-  };
-}
-
-/** Step 2 prompt shown after the price is accepted. */
-export function buildStockStepPromptAndKeyboard(
-  price: number,
-  sessionId: string,
-  lang: BotLang
-): { promptText: string; keyboard: InlineKeyboard } {
-  return {
-    promptText:
-      `${getTelegramText(lang, 'price_confirmed', { price: price.toLocaleString() })}\n\n` +
-      `${getTelegramText(lang, 'step2_header')}\n` +
-      getTelegramText(lang, 'enter_stock_prompt'),
-    keyboard: {
-      inline_keyboard: [
-        [
-          { text: getTelegramText(lang, 'btn_stock_1'), callback_data: 'set_stock_1' },
-          { text: getTelegramText(lang, 'btn_stock_5'), callback_data: 'set_stock_5' },
-          { text: getTelegramText(lang, 'btn_stock_10'), callback_data: 'set_stock_10' },
-        ],
-        cancelButtonRow(lang, sessionId),
-      ],
-    },
-  };
-}
-
-/** Final preview card with Publish / Cancel buttons. */
-export function buildPublishPreviewAndKeyboard(
-  session: TelegramSession,
-  stock: number,
-  lang: BotLang
-): { promptText: string; keyboard: InlineKeyboard } {
-  const ai = getSessionAi(session);
-  const promptText = formatProductPreview({
-    title: ai.title || 'Fashion Item',
-    categoryName: session.draft?.category_name || 'Fashion',
-    brandName: session.draft?.brand_name || null,
-    color: ai.color || 'Standard',
-    material: ai.material || null,
-    gender: ai.gender || 'UNISEX',
-    style: ai.style || null,
-    occasion: ai.occasion || null,
-    season: ai.season || null,
-    description: ai.description || '',
-    price: session.draft?.price || 0,
-    stock,
-    tags: ai.tags || [],
-  }, lang);
-
-  return {
-    promptText,
-    keyboard: {
-      inline_keyboard: [
-        [{ text: getTelegramText(lang, 'btn_publish'), callback_data: `publish_${session.id}` }],
-        cancelButtonRow(lang, session.id),
-      ],
-    },
-  };
 }

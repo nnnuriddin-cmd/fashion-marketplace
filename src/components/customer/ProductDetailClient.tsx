@@ -93,6 +93,12 @@ export default function ProductDetailClient({ product }: { product: any }) {
           </div>
         </div>
 
+        {product.aiModelPhoto && selectedImage === product.aiModelPhoto && (
+          <p className="text-xs text-neutral-500 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2">
+            📸 {t('product.aiModelNote')} <span className="font-semibold text-neutral-700">{product.title}</span>
+          </p>
+        )}
+
         {/* Thumbnails Row */}
         {images.length > 1 && (
           <div className="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
