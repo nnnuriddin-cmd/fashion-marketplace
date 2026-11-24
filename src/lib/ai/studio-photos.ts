@@ -7,7 +7,8 @@ import { editImageWithOpenAi, isOpenAiImageConfigured, OpenAiImageError } from '
 /**
  * AI "studio" photos for products:
  *   white     – the same item on a clean white background
- *   mannequin – the same garment dressed on a white mannequin (apparel only)
+ *   mannequin – the same garment dressed on a display mannequin (apparel only)
+ *   model     – the same garment worn by a fictional AI fashion model (adult apparel only)
  *
  * Generated images are stored in Supabase Storage under
  *   ai/<storeId>/<YYYY-MM-DD>/<jobId>-<kind>.webp
@@ -18,7 +19,7 @@ import { editImageWithOpenAi, isOpenAiImageConfigured, OpenAiImageError } from '
  *   AI_PHOTO_DAILY_LIMIT  – products per store per day (default 10)
  */
 
-export type StudioPhotoKind = 'white' | 'mannequin';
+export type StudioPhotoKind = 'white' | 'mannequin' | 'model';
 
 export interface StudioPhotoResult {
   kind: StudioPhotoKind;
@@ -86,6 +87,32 @@ export function framingForCategory(categoryName: string | null | undefined): Man
   const name = (categoryName || '').toLowerCase();
   if (/dress|skirt|pant|trouser|jean|short|suit|jumpsuit|платье|юбк|брюк|джинс|костюм/.test(name)) return 'full';
   return KNEE_FRAMING_KEYWORDS.some((k) => name.includes(k)) ? 'knees' : 'full';
+}
+
+/**
+ * Fictional AI fashion model wearing the product (adult clothing only).
+ * The person is invented: never a real person or celebrity.
+ * Simple neutral basics may complete the outfit, but never cover the product.
+ */
+export function buildModelPrompt(opts: { body: 'female' | 'male' }): string {
+  const person =
+    opts.body === 'male'
+      ? 'a handsome adult male fashion model in his late 20s with a neat modern haircut and well-groomed look'
+      : 'a beautiful adult female fashion model in her mid 20s with natural, elegant makeup and a neat, sleek hairstyle';
+  return (
+    'Create a photorealistic high-end fashion e-commerce catalog photo of ' +
+    `${person}, wearing the garment from the input image. ` +
+    'The model is a fictional person (not a real person or celebrity), with a friendly, confident expression, ' +
+    'looking at the camera, standing in a natural relaxed fashion pose. ' +
+    PRESERVE_RULES +
+    ' The garment is worn naturally with realistic fit, folds and drape, same closures open or closed as in the ' +
+    'input, and it is the clear focus of the photo, fully visible and not covered by hair, arms or other clothes. ' +
+    'Complete the look only with simple, plain, neutral basics where needed (e.g. plain black or beige trousers or ' +
+    'skirt, simple neutral shoes), in muted colors that do not compete with the product; no logos, no jewelry, no bags. ' +
+    'Full-body shot from head to feet with a small margin. ' +
+    'Background: clean seamless light warm grey studio backdrop (#EEEBE7) with a soft natural floor shadow. ' +
+    'Soft, even, high-key studio lighting, sharp focus, realistic skin texture and hands, natural proportions.'
+  );
 }
 
 export function bodyForGender(gender: string | null | undefined): MannequinBody {
@@ -210,7 +237,7 @@ export async function countAiPhotoJobsToday(storeId: string): Promise<number> {
     console.warn('AI photo usage lookup failed:', error.message);
     return 0;
   }
-  const jobIds = new Set((data || []).map((f) => f.name.replace(/-(white|mannequin)\.webp$/, '')));
+  const jobIds = new Set((data || []).map((f) => f.name.replace(/-(white|mannequin|model)\.webp$/, '')));
   jobIds.delete('.emptyFolderPlaceholder');
   return jobIds.size;
 }
@@ -241,6 +268,11 @@ function buildPrompt(
   gender?: string | null
 ): Promise<string> {
   if (kind === 'white') return Promise.resolve(WHITE_PROMPT);
+  if (kind === 'model') {
+    const body = bodyForGender(gender) === 'male' ? 'male' : 'female';
+    console.log(`[Studio photo] job ${jobId}: AI model body=${body}`);
+    return Promise.resolve(buildModelPrompt({ body }));
+  }
   return detectGarmentTone(input).then((tone) => {
     const framing = framingForCategory(categoryName);
     const body = bodyForGender(gender);

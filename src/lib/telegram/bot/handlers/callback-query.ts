@@ -318,11 +318,13 @@ async function handlePublish(ctx: CallbackContext) {
     return;
   }
 
-  // Photos: the seller's choice of AI studio photos (white / mannequin / both), or the original
+  // Photos: the seller's choice of AI studio photos (AI model / white / mannequin), or the original
   const studio: StudioCandidates = {
     white: draft.ai_photos?.white || null,
     mannequin: draft.ai_photos?.mannequin || null,
+    model: draft.ai_photos?.model || null,
   };
+  const hasStudio = Boolean(studio.white || studio.mannequin || studio.model);
   const productImages = resolveChosenImages(draft.photo_choice, studio, imageUrl);
 
   const title = ai.title || 'Fashion Item';
@@ -354,9 +356,7 @@ async function handlePublish(ctx: CallbackContext) {
         telegram_session_id: sessionId,
         studioProcessed: true,
         publishedVia: 'TELEGRAM_BOT',
-        ...(studio.white || studio.mannequin
-          ? { ai_photo_candidates: { white: studio.white || null, mannequin: studio.mannequin || null } }
-          : {}),
+        ...(hasStudio ? { ai_photo_candidates: studio } : {}),
         // Lets photos that finish after publishing (and their retries) land on this product
         ...(draft.ai_photos?.kinds
           ? {

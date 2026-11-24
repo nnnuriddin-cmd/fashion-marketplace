@@ -2,7 +2,6 @@
  * Localized messages and keyboards of the Telegram seller bot.
  */
 import {
-  formatAiExtractionDetails,
   formatProductPreview,
   getTelegramText,
 } from '@/lib/telegram/product-draft';
@@ -81,13 +80,15 @@ export function cancelButtonRow(lang: BotLang, sessionId: string) {
 }
 
 /**
- * Formats the AI extraction card, step 1 price prompt, and inline keyboard.
+ * Step 1 price prompt and inline keyboard.
+ * The AI details (title, category, color, description…) are NOT shown in the chat anymore:
+ * they are still generated and saved for the website, the seller only sets price and stock.
  * Only offers the "Use {price} UZS" button if suggestedPrice is an integer >= 1000.
  */
 export function buildPriceStepPromptAndKeyboard(
   ai: any,
-  categoryName: string,
-  brandName: string | null,
+  _categoryName: string,
+  _brandName: string | null,
   sessionId: string,
   lang: BotLang = 'uz'
 ): { promptText: string; keyboard: InlineKeyboard } {
@@ -97,16 +98,7 @@ export function buildPriceStepPromptAndKeyboard(
     Number.isInteger(suggestedPrice) &&
     suggestedPrice >= 1000;
 
-  const rawDetails = formatAiExtractionDetails(
-    { ...ai, suggestedPrice: undefined },
-    categoryName,
-    brandName,
-    lang
-  );
-  const stepHeader = getTelegramText(lang, 'step1_header');
-  const baseCard = rawDetails.includes(stepHeader)
-    ? rawDetails.split(stepHeader)[0] + stepHeader
-    : rawDetails;
+  const baseCard = getTelegramText(lang, 'step1_header');
 
   if (hasValidSuggestedPrice) {
     const formattedPrice = suggestedPrice.toLocaleString();

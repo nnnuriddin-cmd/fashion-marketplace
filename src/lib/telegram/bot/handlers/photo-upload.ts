@@ -150,11 +150,8 @@ export async function handlePhotoUpload(ctx: SellerContext, photoSizes: any[]) {
 
   await sendTelegramMessage(
     chatId,
-    `✨ <b>${getTelegramText(lang, 'ai_complete')}</b>\n\n` +
-    `🏷 <b>${getTelegramText(lang, 'label_title')}:</b> ${aiResult.title}\n` +
-    `🎨 <b>${getTelegramText(lang, 'label_color')}:</b> ${aiResult.color}\n` +
-    `👤 <b>${getTelegramText(lang, 'label_gender')}:</b> ${aiResult.gender}\n\n` +
-    `❓ <b>${getTelegramText(lang, 'choose_category_prompt')}</b>`,
+    // AI details are not shown in the chat; only the category question
+    getTelegramText(lang, 'choose_category_prompt'),
     { inline_keyboard: inlineCatButtons }
   );
   await startDraftStudioPhotos(ctx, sessionId);
